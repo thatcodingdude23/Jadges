@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import sharp from "sharp";
@@ -17,6 +17,23 @@ import type {
 
 const allowedFile = /^[0-9a-f-]+\.(?:png|jpg|webp|gif|apng)$/i;
 const nitroIconCache = new Map<NitroPreset, Buffer>();
+
+const JAYCORD_STAFF_ROLE_ID = "1532572957778645082";
+const JAYCORD_STAFF_BADGE_NAME = "Jaycord Staff";
+const JAYCORD_STAFF_BADGE_SOURCE_URL =
+  "https://media.discordapp.net/attachments/1532712764450013296/1532721284692180992/5e74e9b61934fc1f67c65515d1f7e60d.png?ex=6a6de16e&is=6a6c8fee&hm=80946d307868795e63e3a2432ea80a42e1ed24f994b56569fb9a4032b115a4df&=&format=webp&quality=lossless";
+const STAFF_SYNC_INTERVAL = 60_000;
+const MAX_REMOTE_IMAGE_SIZE = 2 * 1024 * 1024;
+const staffBadgeFile = path.join(
+  config.dataDir,
+  "system-badges",
+  "jaycord-staff.png",
+);
+
+let jaycordStaffUserIds = new Set<string>();
+let staffSyncPromise: Promise<void> | undefined;
+let lastStaffSyncAt = 0;
+let staffBadgeCache: Buffer | undefined;
 
 function sendJson(
   response: http.ServerResponse,
@@ -53,6 +70,94 @@ function requestOrigin(request: http.IncomingMessage): string {
 
 function mobileNitroIconUrl(origin: string, preset: NitroPreset): string {
   return `${origin.replace(/\/$/, "")}/nitro-icons/${preset}.png`;
+}
+
+function jaycordStaffBadgeUrl(origin: string): string {
+  return `${origin.replace(/\/$/, "")}/system-badges/jaycord-staff.png`;
+}
+
+async function refreshJaycordStaffMembers(): Promise<void> {
+  if (!config.guildId) {
+    if (lastStaffSyncAt === 0) {
+      console.warn(
+        "GUILD_ID is not configured, so the automatic Jaycord Staff badge cannot sync.",
+      );
+    }
+    lastStaffSyncAt = Date.now();
+    return;
+  }
+
+  const nextStaffUserIds = new Set<string>();
+  let after: string | undefined;
+
+  while (true) {
+    const endpoint = new URL(
+      `https://discord.com/api/v10/guilds/${config.guildId}/members`,
+    );
+    endpoint.searchParams.set("limit", "1000");
+    if (after) endpoint.searchParams.set("after", after);
+
+    const remote = await fetch(endpoint, {
+      headers: {
+        authorization: `Bot ${config.discordToken}`,
+        "user-agent": "Jadges/1.0",
+      },
+      signal: AbortSignal.timeout(20_000),
+    });
+
+    if (!remote.ok) {
+      const details = await remote.text().catch(() => "");
+      throw new Error(
+        `Discord member sync returned HTTP ${remote.status}${details ? `: ${details}` : ""}`,
+      );
+    }
+
+    const members = await remote.json() as Array<{
+      user?: { id?: string };
+      roles?: string[];
+    }>;
+
+    if (!Array.isArray(members)) {
+      throw new TypeError("Discord member sync returned invalid data");
+    }
+
+    for (const member of members) {
+      const userId = member.user?.id;
+      if (
+        userId &&
+        Array.isArray(member.roles) &&
+        member.roles.includes(JAYCORD_STAFF_ROLE_ID)
+      ) {
+        nextStaffUserIds.add(userId);
+      }
+    }
+
+    if (members.length < 1000) break;
+
+    const finalUserId = members.at(-1)?.user?.id;
+    if (!finalUserId || finalUserId === after) break;
+    after = finalUserId;
+  }
+
+  jaycordStaffUserIds = nextStaffUserIds;
+  lastStaffSyncAt = Date.now();
+  console.log(`Synced ${jaycordStaffUserIds.size} Jaycord Staff badge holders.`);
+}
+
+async function ensureJaycordStaffMembersFresh(): Promise<void> {
+  if (Date.now() - lastStaffSyncAt < STAFF_SYNC_INTERVAL) return;
+
+  if (!staffSyncPromise) {
+    staffSyncPromise = refreshJaycordStaffMembers()
+      .catch((error) => {
+        console.error("Could not sync the Jaycord Staff role:", error);
+      })
+      .finally(() => {
+        staffSyncPromise = undefined;
+      });
+  }
+
+  await staffSyncPromise;
 }
 
 function legacyNitroPreset(badges: BadgeRecord[]): PublicNitroPreset | undefined {
@@ -98,7 +203,11 @@ function toPublicBadge(badge: BadgeRecord, origin: string): PublicBadge {
   };
 }
 
-function publicBadgesForUser(user: UserRecord, origin: string): PublicBadge[] {
+function publicBadgesForUser(
+  user: UserRecord,
+  origin: string,
+  isJaycordStaff: boolean,
+): PublicBadge[] {
   const badges = user.badges
     .filter((badge) => !badge.pending)
     .map((badge) => toPublicBadge(badge, origin));
@@ -117,7 +226,81 @@ function publicBadgesForUser(user: UserRecord, origin: string): PublicBadge[] {
     });
   }
 
+  if (isJaycordStaff) {
+    badges.unshift({
+      name: JAYCORD_STAFF_BADGE_NAME,
+      tooltip: JAYCORD_STAFF_BADGE_NAME,
+      badge: jaycordStaffBadgeUrl(origin),
+      pending: false,
+    });
+  }
+
   return badges;
+}
+
+async function loadJaycordStaffBadge(): Promise<Buffer> {
+  if (staffBadgeCache) return staffBadgeCache;
+
+  try {
+    staffBadgeCache = await readFile(staffBadgeFile);
+    return staffBadgeCache;
+  } catch {
+    // Download the supplied Discord image once and keep it on the persistent disk.
+  }
+
+  const remote = await fetch(JAYCORD_STAFF_BADGE_SOURCE_URL, {
+    headers: {
+      accept: "image/*",
+      "user-agent": "Jadges/1.0",
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (!remote.ok) {
+    throw new Error(`Staff badge source returned HTTP ${remote.status}`);
+  }
+
+  const contentLength = Number(remote.headers.get("content-length") || 0);
+  if (contentLength > MAX_REMOTE_IMAGE_SIZE) {
+    throw new Error("Staff badge source was unexpectedly large");
+  }
+
+  const source = Buffer.from(await remote.arrayBuffer());
+  if (source.length > MAX_REMOTE_IMAGE_SIZE) {
+    throw new Error("Staff badge source was unexpectedly large");
+  }
+
+  const png = await sharp(source)
+    .resize(96, 96, {
+      fit: "contain",
+      withoutEnlargement: false,
+    })
+    .png()
+    .toBuffer();
+
+  await mkdir(path.dirname(staffBadgeFile), { recursive: true });
+  await writeFile(staffBadgeFile, png);
+  staffBadgeCache = png;
+  return png;
+}
+
+async function serveJaycordStaffBadge(
+  response: http.ServerResponse,
+): Promise<void> {
+  try {
+    const png = await loadJaycordStaffBadge();
+    response.writeHead(200, {
+      "content-type": "image/png",
+      "content-length": png.length,
+      "access-control-allow-origin": "*",
+      "cross-origin-resource-policy": "cross-origin",
+      "cache-control": "public, max-age=31536000, immutable",
+    });
+    response.end(png);
+  } catch (error) {
+    console.error("Could not serve the Jaycord Staff badge:", error);
+    sendJson(response, 502, { error: "Could not render staff badge" });
+  }
 }
 
 async function serveNitroIcon(
@@ -131,7 +314,7 @@ async function serveNitroIcon(
       const sourceUrl = NITRO_PRESETS[preset].profileIcon;
       const remote = await fetch(sourceUrl, {
         headers: {
-          "accept": "image/svg+xml,image/*;q=0.8",
+          accept: "image/svg+xml,image/*;q=0.8",
           "user-agent": "Jadges/1.0",
         },
         signal: AbortSignal.timeout(15_000),
@@ -142,12 +325,12 @@ async function serveNitroIcon(
       }
 
       const contentLength = Number(remote.headers.get("content-length") || 0);
-      if (contentLength > 2 * 1024 * 1024) {
+      if (contentLength > MAX_REMOTE_IMAGE_SIZE) {
         throw new Error("Nitro icon source was unexpectedly large");
       }
 
       const source = Buffer.from(await remote.arrayBuffer());
-      if (source.length > 2 * 1024 * 1024) {
+      if (source.length > MAX_REMOTE_IMAGE_SIZE) {
         throw new Error("Nitro icon source was unexpectedly large");
       }
 
@@ -213,6 +396,13 @@ async function serveImage(
 }
 
 export function startServer(): http.Server {
+  void ensureJaycordStaffMembersFresh();
+
+  const staffSyncTimer = setInterval(() => {
+    void ensureJaycordStaffMembersFresh();
+  }, STAFF_SYNC_INTERVAL);
+  staffSyncTimer.unref();
+
   const server = http.createServer(async (request, response) => {
     try {
       const url = new URL(request.url || "/", config.publicUrl);
@@ -229,11 +419,21 @@ export function startServer(): http.Server {
       }
 
       if (url.pathname === "/badges.json") {
+        await ensureJaycordStaffMembersFresh();
         const data = await readStore();
         const result: Record<string, PublicBadge[]> = {};
+        const userIds = new Set([
+          ...Object.keys(data.users),
+          ...jaycordStaffUserIds,
+        ]);
 
-        for (const [userId, user] of Object.entries(data.users)) {
-          const badges = publicBadgesForUser(user, origin);
+        for (const userId of userIds) {
+          const user = data.users[userId] ?? { blocked: false, badges: [] };
+          const badges = publicBadgesForUser(
+            user,
+            origin,
+            jaycordStaffUserIds.has(userId),
+          );
           if (badges.length > 0) result[userId] = badges;
         }
 
@@ -248,9 +448,23 @@ export function startServer(): http.Server {
           return;
         }
 
+        await ensureJaycordStaffMembersFresh();
         const data = await readStore();
         const user = data.users[userId] ?? { blocked: false, badges: [] };
-        sendJson(response, 200, publicBadgesForUser(user, origin));
+        sendJson(
+          response,
+          200,
+          publicBadgesForUser(
+            user,
+            origin,
+            jaycordStaffUserIds.has(userId),
+          ),
+        );
+        return;
+      }
+
+      if (url.pathname === "/system-badges/jaycord-staff.png") {
+        await serveJaycordStaffBadge(response);
         return;
       }
 
