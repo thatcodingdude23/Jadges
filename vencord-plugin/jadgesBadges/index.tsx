@@ -5,6 +5,7 @@
  */
 
 import basePlugin from "./base";
+import { startUpdateChecker, stopUpdateChecker } from "./updater";
 
 const BADGE_QUERY = 'img[class*="badge"], img.jadges-profile-badge-image';
 
@@ -161,6 +162,7 @@ async function startWithoutGlobalBadgeClick(): Promise<void> {
 
     try {
         await (basePlugin as any).start?.();
+        startUpdateChecker();
     } finally {
         document.addEventListener = originalAdd;
     }
@@ -168,10 +170,11 @@ async function startWithoutGlobalBadgeClick(): Promise<void> {
 
 export default {
     ...(basePlugin as any),
-    description: "Displays Jadges badges and rearranges native Discord badges without intercepting status clicks.",
+    description: "Displays Jadges badges, rearranges native Discord badges, and installs verified Jadges updates.",
     start: startWithoutGlobalBadgeClick,
     stop() {
         try {
+            stopUpdateChecker();
             (basePlugin as any).stop?.();
         } finally {
             restoreGuards();
