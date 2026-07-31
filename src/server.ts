@@ -1,10 +1,11 @@
 import { createReadStream } from "node:fs";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import sharp from "sharp";
 import { config } from "./config.js";
 import { isNitroPreset, NITRO_PRESETS, publicNitroPreset } from "./presets.js";
+import { handleRearrangeRequest } from "./rearrange.js";
 import { publicImageUrl } from "./storage.js";
 import { readStore } from "./store.js";
 import type {
@@ -17,23 +18,14 @@ import type {
 
 const allowedFile = /^[0-9a-f-]+\.(?:png|jpg|webp|gif|apng)$/i;
 const nitroIconCache = new Map<NitroPreset, Buffer>();
-
 const JAYCORD_STAFF_ROLE_ID = "1532572957778645082";
 const JAYCORD_STAFF_BADGE_NAME = "Jaycord Staff";
-const JAYCORD_STAFF_BADGE_SOURCE_URL =
-  "https://media.discordapp.net/attachments/1532712764450013296/1532721284692180992/5e74e9b61934fc1f67c65515d1f7e60d.png?ex=6a6de16e&is=6a6c8fee&hm=80946d307868795e63e3a2432ea80a42e1ed24f994b56569fb9a4032b115a4df&=&format=webp&quality=lossless";
 const STAFF_SYNC_INTERVAL = 60_000;
 const MAX_REMOTE_IMAGE_SIZE = 2 * 1024 * 1024;
-const staffBadgeFile = path.join(
-  config.dataDir,
-  "system-badges",
-  "jaycord-staff.png",
-);
 
 let jaycordStaffUserIds = new Set<string>();
 let staffSyncPromise: Promise<void> | undefined;
 let lastStaffSyncAt = 0;
-let staffBadgeCache: Buffer | undefined;
 
 function sendJson(
   response: http.ServerResponse,
@@ -70,10 +62,6 @@ function requestOrigin(request: http.IncomingMessage): string {
 
 function mobileNitroIconUrl(origin: string, preset: NitroPreset): string {
   return `${origin.replace(/\/$/, "")}/nitro-icons/${preset}.png`;
-}
-
-function jaycordStaffBadgeUrl(origin: string): string {
-  return `${origin.replace(/\/$/, "")}/system-badges/jaycord-staff.png`;
 }
 
 async function refreshJaycordStaffMembers(): Promise<void> {
@@ -193,14 +181,35 @@ function activeNitroPreset(user: UserRecord): PublicNitroPreset | undefined {
   return legacyNitroPreset(user.badges);
 }
 
-function toPublicBadge(badge: BadgeRecord, origin: string): PublicBadge {
+function toPublicBadge(
+  badge: BadgeRecord,
+  origin: string,
+  side: UserRecord["badgeSide"],
+): PublicBadge {
   return {
+    key: `custom:${badge.id}`,
     name: badge.name,
     tooltip: badge.name,
     badge: publicImageUrl(badge.filename, origin),
     pending: false,
     createdAt: badge.createdAt,
+    side,
   };
+}
+
+function orderMovableBadges(user: UserRecord, badges: PublicBadge[]): PublicBadge[] {
+  const rank = new Map((user.badgeOrder || []).map((key, index) => [key, index]));
+  return badges
+    .map((badge, index) => ({ badge, index }))
+    .sort((left, right) => {
+      const leftRank = rank.get(left.badge.key);
+      const rightRank = rank.get(right.badge.key);
+      if (leftRank !== undefined && rightRank !== undefined) return leftRank - rightRank;
+      if (leftRank !== undefined) return -1;
+      if (rightRank !== undefined) return 1;
+      return left.index - right.index;
+    })
+    .map(({ badge }) => badge);
 }
 
 function publicBadgesForUser(
@@ -208,17 +217,22 @@ function publicBadgesForUser(
   origin: string,
   isJaycordStaff: boolean,
 ): PublicBadge[] {
-  const badges = user.badges
+  const side = user.badgeSide;
+  const movable = user.badges
     .filter((badge) => !badge.pending)
-    .map((badge) => toPublicBadge(badge, origin));
+    .map((badge) => toPublicBadge(badge, origin, side));
 
   const nitro = activeNitroPreset(user);
   if (nitro) {
-    badges.unshift({
-      name: `Nitro ${nitro.label}`,
-      tooltip: `Subscriber since ${nitro.subscriberSince}`,
+    movable.push({
+      key: "nitro",
+      name: nitro.key === "remove" ? "Remove Nitro Badge" : `Nitro ${nitro.label}`,
+      tooltip: nitro.key === "remove"
+        ? "Native Nitro and server-boosting badges hidden"
+        : `Subscriber since ${nitro.subscriberSince}`,
       badge: "",
       pending: false,
+      side,
       nitro: {
         ...nitro,
         mobileIcon: mobileNitroIconUrl(origin, nitro.key),
@@ -226,81 +240,20 @@ function publicBadgesForUser(
     });
   }
 
+  const ordered = orderMovableBadges(user, movable);
+
   if (isJaycordStaff) {
-    badges.unshift({
+    ordered.unshift({
+      key: "staff",
       name: JAYCORD_STAFF_BADGE_NAME,
       tooltip: JAYCORD_STAFF_BADGE_NAME,
-      badge: jaycordStaffBadgeUrl(origin),
+      badge: config.jaycordStaffBadgeUrl,
       pending: false,
+      side,
     });
   }
 
-  return badges;
-}
-
-async function loadJaycordStaffBadge(): Promise<Buffer> {
-  if (staffBadgeCache) return staffBadgeCache;
-
-  try {
-    staffBadgeCache = await readFile(staffBadgeFile);
-    return staffBadgeCache;
-  } catch {
-    // Download the supplied Discord image once and keep it on the persistent disk.
-  }
-
-  const remote = await fetch(JAYCORD_STAFF_BADGE_SOURCE_URL, {
-    headers: {
-      accept: "image/*",
-      "user-agent": "Jadges/1.0",
-    },
-    signal: AbortSignal.timeout(15_000),
-  });
-
-  if (!remote.ok) {
-    throw new Error(`Staff badge source returned HTTP ${remote.status}`);
-  }
-
-  const contentLength = Number(remote.headers.get("content-length") || 0);
-  if (contentLength > MAX_REMOTE_IMAGE_SIZE) {
-    throw new Error("Staff badge source was unexpectedly large");
-  }
-
-  const source = Buffer.from(await remote.arrayBuffer());
-  if (source.length > MAX_REMOTE_IMAGE_SIZE) {
-    throw new Error("Staff badge source was unexpectedly large");
-  }
-
-  const png = await sharp(source)
-    .resize(96, 96, {
-      fit: "contain",
-      withoutEnlargement: false,
-    })
-    .png()
-    .toBuffer();
-
-  await mkdir(path.dirname(staffBadgeFile), { recursive: true });
-  await writeFile(staffBadgeFile, png);
-  staffBadgeCache = png;
-  return png;
-}
-
-async function serveJaycordStaffBadge(
-  response: http.ServerResponse,
-): Promise<void> {
-  try {
-    const png = await loadJaycordStaffBadge();
-    response.writeHead(200, {
-      "content-type": "image/png",
-      "content-length": png.length,
-      "access-control-allow-origin": "*",
-      "cross-origin-resource-policy": "cross-origin",
-      "cache-control": "public, max-age=31536000, immutable",
-    });
-    response.end(png);
-  } catch (error) {
-    console.error("Could not serve the Jaycord Staff badge:", error);
-    sendJson(response, 502, { error: "Could not render staff badge" });
-  }
+  return ordered;
 }
 
 async function serveNitroIcon(
@@ -408,6 +361,18 @@ export function startServer(): http.Server {
       const url = new URL(request.url || "/", config.publicUrl);
       const origin = requestOrigin(request);
 
+      if (
+        await handleRearrangeRequest(
+          request,
+          response,
+          url,
+          origin,
+          (userId) => jaycordStaffUserIds.has(userId),
+        )
+      ) {
+        return;
+      }
+
       if (request.method !== "GET") {
         sendJson(response, 405, { error: "Method not allowed" });
         return;
@@ -464,7 +429,11 @@ export function startServer(): http.Server {
       }
 
       if (url.pathname === "/system-badges/jaycord-staff.png") {
-        await serveJaycordStaffBadge(response);
+        response.writeHead(302, {
+          location: config.jaycordStaffBadgeUrl,
+          "cache-control": "no-store",
+        });
+        response.end();
         return;
       }
 
