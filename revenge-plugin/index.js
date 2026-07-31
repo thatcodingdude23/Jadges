@@ -298,8 +298,11 @@
 
           void reportNativeBadges(userId, originalBadges);
 
-          const jadges = badgeData[userId];
-          if (!Array.isArray(jadges) || jadges.length === 0) return originalBadges;
+          const jadges = Array.isArray(badgeData[userId])
+            ? badgeData[userId]
+            : [];
+          const hasSettings = Boolean(settingsData[userId]);
+          if (jadges.length === 0 && !hasSettings) return originalBadges;
 
           const nitro = getNitroPreset(jadges);
           const hideNativeBadges =
