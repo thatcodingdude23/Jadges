@@ -2,25 +2,9 @@ import {
   getOrCreateUser,
   mutateStore,
 } from "./store.js";
-import type { NativeBadgeObservation, UserRecord } from "./types.js";
+import type { NativeBadgeObservation } from "./types.js";
 
-function availableOrderKeys(user: UserRecord): Set<string> {
-  const keys = new Set(
-    user.badges
-      .filter((badge) => !badge.pending)
-      .map((badge) => `custom:${badge.id}`),
-  );
-
-  if (user.nitro && !user.nitro.pending && user.nitro.preset !== "remove") {
-    keys.add("nitro");
-  }
-
-  for (const badge of user.nativeBadges || []) {
-    keys.add(badge.key);
-  }
-
-  return keys;
-}
+const STALE_NATIVE_BADGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 export async function setObservedNativeBadges(
   userId: string,
@@ -28,19 +12,31 @@ export async function setObservedNativeBadges(
 ): Promise<void> {
   await mutateStore((data) => {
     const user = getOrCreateUser(data, userId);
-    const unique = new Map<string, NativeBadgeObservation>();
+    const merged = new Map<string, NativeBadgeObservation>();
+    const now = Date.now();
+    const orderedKeys = new Set(user.badgeOrder || []);
+
+    // Keep previously detected badges when Discord briefly renders only part of
+    // the profile badge row. This prevents valid badges, such as Gifting, from
+    // disappearing during a rearrangement save.
+    for (const badge of user.nativeBadges || []) {
+      const updatedAt = Date.parse(badge.updatedAt);
+      const isRecent = Number.isFinite(updatedAt)
+        && now - updatedAt <= STALE_NATIVE_BADGE_MS;
+
+      if (isRecent || orderedKeys.has(badge.key)) {
+        merged.set(badge.key, badge);
+      }
+    }
 
     for (const badge of badges.slice(0, 25)) {
-      if (!unique.has(badge.key)) unique.set(badge.key, badge);
+      merged.set(badge.key, badge);
     }
 
-    user.nativeBadges = [...unique.values()];
+    user.nativeBadges = [...merged.values()].slice(0, 25);
     if (user.nativeBadges.length === 0) delete user.nativeBadges;
 
-    if (user.badgeOrder) {
-      const available = availableOrderKeys(user);
-      user.badgeOrder = user.badgeOrder.filter((key) => available.has(key));
-      if (user.badgeOrder.length === 0) delete user.badgeOrder;
-    }
+    // Do not remove saved native order keys because a partial Discord render is
+    // not proof that the badge was removed from the account.
   });
 }
