@@ -42,8 +42,10 @@ Install the `JadgesBadges` userplugin in your Vencord source and rebuild Vencord
 Open Revenge's plugin settings, choose **Add Plugin**, and paste this source URL:
 
 ```text
-https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/manifest.json
+https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/
 ```
+
+Revenge automatically loads `manifest.json` and the plugin JavaScript from that folder.
 
 ## How it works
 
