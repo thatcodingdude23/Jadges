@@ -1,5 +1,5 @@
 {
-  "version": 13,
+  "version": 14,
   "files": [
     {
       "path": "index.tsx",
@@ -19,7 +19,7 @@
     },
     {
       "path": "updater.ts",
-      "sha256": "3bf8d803ae00378bfde968bbdf05c8f2511bbe2d0011790970c056a2c4354e1b"
+      "sha256": "7f368f9e3d94af32c5e2d8a75e4e4834c7e07019b155948634249ec651873f1d"
     },
     {
       "path": "updateNative.ts",
