@@ -3,7 +3,9 @@ import { config } from "./config.js";
 import type {
   BadgeRecord,
   BadgeSide,
+  NativeBadgeObservation,
   NitroRecord,
+  StaffBadgeMode,
   StoreData,
   UserRecord,
 } from "./types.js";
@@ -20,6 +22,43 @@ async function ensureStore(): Promise<void> {
   }
 }
 
+function normalizeUser(user: UserRecord): void {
+  user.blocked ??= false;
+  user.badges ??= [];
+
+  if (user.badgeOrder && !Array.isArray(user.badgeOrder)) {
+    delete user.badgeOrder;
+  } else if (user.badgeOrder) {
+    user.badgeOrder = [...new Set(
+      user.badgeOrder.filter((value): value is string => typeof value === "string"),
+    )];
+  }
+
+  if (user.badgeSide !== "left" && user.badgeSide !== "right") {
+    delete user.badgeSide;
+  }
+
+  if (user.staffBadgeMode !== "admin") {
+    delete user.staffBadgeMode;
+  }
+
+  if (!Array.isArray(user.nativeBadges)) {
+    delete user.nativeBadges;
+  } else {
+    user.nativeBadges = user.nativeBadges
+      .filter((badge) =>
+        badge &&
+        typeof badge.key === "string" &&
+        badge.key.startsWith("discord:") &&
+        typeof badge.name === "string" &&
+        typeof badge.image === "string" &&
+        typeof badge.updatedAt === "string"
+      )
+      .slice(0, 25);
+    if (user.nativeBadges.length === 0) delete user.nativeBadges;
+  }
+}
+
 async function readStoreUnsafe(): Promise<StoreData> {
   await ensureStore();
   const raw = await readFile(config.storeFile, "utf8");
@@ -27,14 +66,7 @@ async function readStoreUnsafe(): Promise<StoreData> {
   parsed.users ??= {};
 
   for (const user of Object.values(parsed.users)) {
-    user.blocked ??= false;
-    user.badges ??= [];
-    if (user.badgeOrder && !Array.isArray(user.badgeOrder)) {
-      delete user.badgeOrder;
-    }
-    if (user.badgeSide !== "left" && user.badgeSide !== "right") {
-      delete user.badgeSide;
-    }
+    normalizeUser(user);
   }
 
   return parsed;
@@ -71,7 +103,7 @@ export function mutateStore<T>(
 
 export function getOrCreateUser(data: StoreData, userId: string): UserRecord {
   const user = data.users[userId] ??= { blocked: false, badges: [] };
-  user.badges ??= [];
+  normalizeUser(user);
   return user;
 }
 
@@ -79,6 +111,24 @@ function removeOrderKey(user: UserRecord, key: string): void {
   if (!user.badgeOrder) return;
   user.badgeOrder = user.badgeOrder.filter((item) => item !== key);
   if (user.badgeOrder.length === 0) delete user.badgeOrder;
+}
+
+function availableOrderKeys(user: UserRecord): Set<string> {
+  const keys = new Set(
+    user.badges
+      .filter((badge) => !badge.pending)
+      .map((badge) => `custom:${badge.id}`),
+  );
+
+  if (user.nitro && !user.nitro.pending && user.nitro.preset !== "remove") {
+    keys.add("nitro");
+  }
+
+  for (const badge of user.nativeBadges || []) {
+    keys.add(badge.key);
+  }
+
+  return keys;
 }
 
 export async function getUser(userId: string): Promise<UserRecord> {
@@ -269,6 +319,40 @@ export async function setBadgeSide(
     const user = getOrCreateUser(data, userId);
     if (side === "left" || side === "right") user.badgeSide = side;
     else delete user.badgeSide;
+  });
+}
+
+export async function setObservedNativeBadges(
+  userId: string,
+  badges: NativeBadgeObservation[],
+): Promise<void> {
+  await mutateStore((data) => {
+    const user = getOrCreateUser(data, userId);
+    const unique = new Map<string, NativeBadgeObservation>();
+
+    for (const badge of badges.slice(0, 25)) {
+      if (!unique.has(badge.key)) unique.set(badge.key, badge);
+    }
+
+    user.nativeBadges = [...unique.values()];
+    if (user.nativeBadges.length === 0) delete user.nativeBadges;
+
+    if (user.badgeOrder) {
+      const available = availableOrderKeys(user);
+      user.badgeOrder = user.badgeOrder.filter((key) => available.has(key));
+      if (user.badgeOrder.length === 0) delete user.badgeOrder;
+    }
+  });
+}
+
+export async function setStaffBadgeMode(
+  userId: string,
+  mode: StaffBadgeMode,
+): Promise<void> {
+  await mutateStore((data) => {
+    const user = getOrCreateUser(data, userId);
+    if (mode === "admin") user.staffBadgeMode = "admin";
+    else delete user.staffBadgeMode;
   });
 }
 
