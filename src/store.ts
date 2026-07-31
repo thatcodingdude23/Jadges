@@ -2,6 +2,7 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { config } from "./config.js";
 import type {
   BadgeRecord,
+  BadgeSide,
   NitroRecord,
   StoreData,
   UserRecord,
@@ -28,6 +29,12 @@ async function readStoreUnsafe(): Promise<StoreData> {
   for (const user of Object.values(parsed.users)) {
     user.blocked ??= false;
     user.badges ??= [];
+    if (user.badgeOrder && !Array.isArray(user.badgeOrder)) {
+      delete user.badgeOrder;
+    }
+    if (user.badgeSide !== "left" && user.badgeSide !== "right") {
+      delete user.badgeSide;
+    }
   }
 
   return parsed;
@@ -68,6 +75,12 @@ export function getOrCreateUser(data: StoreData, userId: string): UserRecord {
   return user;
 }
 
+function removeOrderKey(user: UserRecord, key: string): void {
+  if (!user.badgeOrder) return;
+  user.badgeOrder = user.badgeOrder.filter((item) => item !== key);
+  if (user.badgeOrder.length === 0) delete user.badgeOrder;
+}
+
 export async function getUser(userId: string): Promise<UserRecord> {
   const data = await readStore();
   return data.users[userId] ?? { blocked: false, badges: [] };
@@ -100,10 +113,26 @@ export async function removeBadgeById(badgeId: string): Promise<BadgeRecord> {
       if (index !== -1) {
         const [badge] = user.badges.splice(index, 1);
         if (!badge) throw new Error("Badge not found");
+        removeOrderKey(user, `custom:${badge.id}`);
         return badge;
       }
     }
     throw new Error("Badge not found");
+  });
+}
+
+export async function removeBadgeForUserById(
+  userId: string,
+  badgeId: string,
+): Promise<BadgeRecord> {
+  return mutateStore((data) => {
+    const user = getOrCreateUser(data, userId);
+    const index = user.badges.findIndex((item) => item.id === badgeId);
+    if (index === -1) throw new Error("Badge not found");
+    const [badge] = user.badges.splice(index, 1);
+    if (!badge) throw new Error("Badge not found");
+    removeOrderKey(user, `custom:${badge.id}`);
+    return badge;
   });
 }
 
@@ -119,6 +148,7 @@ export async function removeBadgeByName(
     if (index === -1) throw new Error("Badge not found");
     const [badge] = user.badges.splice(index, 1);
     if (!badge) throw new Error("Badge not found");
+    removeOrderKey(user, `custom:${badge.id}`);
     return badge;
   });
 }
@@ -165,6 +195,31 @@ export async function removePendingNitro(requestId: string): Promise<NitroRecord
   });
 }
 
+export async function removePendingNitroForUser(
+  userId: string,
+): Promise<NitroRecord> {
+  return mutateStore((data) => {
+    const user = getOrCreateUser(data, userId);
+    const request = user.pendingNitro;
+    if (!request) throw new Error("Pending Nitro request not found");
+    delete user.pendingNitro;
+    return request;
+  });
+}
+
+export async function removeEquippedNitroForUser(
+  userId: string,
+): Promise<NitroRecord> {
+  return mutateStore((data) => {
+    const user = getOrCreateUser(data, userId);
+    const request = user.nitro;
+    if (!request) throw new Error("Equipped Nitro badge not found");
+    delete user.nitro;
+    removeOrderKey(user, "nitro");
+    return request;
+  });
+}
+
 export interface RemovedNitroState {
   removedEquipped: boolean;
   removedPending: boolean;
@@ -182,6 +237,7 @@ export async function removeNitroForUser(
 
     delete user.nitro;
     delete user.pendingNitro;
+    removeOrderKey(user, "nitro");
 
     for (const badge of user.badges) {
       if (!badge.nitroPreset) continue;
@@ -190,6 +246,29 @@ export async function removeNitroForUser(
     }
 
     return { removedEquipped, removedPending, removedLegacy };
+  });
+}
+
+export async function setBadgeOrder(
+  userId: string,
+  order: string[],
+): Promise<void> {
+  await mutateStore((data) => {
+    const user = getOrCreateUser(data, userId);
+    const unique = [...new Set(order.filter((value) => typeof value === "string"))];
+    if (unique.length > 0) user.badgeOrder = unique;
+    else delete user.badgeOrder;
+  });
+}
+
+export async function setBadgeSide(
+  userId: string,
+  side: BadgeSide | undefined,
+): Promise<void> {
+  await mutateStore((data) => {
+    const user = getOrCreateUser(data, userId);
+    if (side === "left" || side === "right") user.badgeSide = side;
+    else delete user.badgeSide;
   });
 }
 
