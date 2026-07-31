@@ -46,6 +46,8 @@ export interface PublicNitroPreset {
   label: string;
   months: number;
   profileIcon: string;
+  /** PNG rendering of profileIcon for mobile clients that cannot display remote SVGs. */
+  mobileIcon?: string;
   hoverImage: string;
   subscriberSince: string;
 }
