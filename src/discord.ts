@@ -107,6 +107,7 @@ const botPresence = {
     {
       name: "Badges being made",
       type: ActivityType.Watching,
+      url: "https://discord.gg/jaycord",
     },
   ],
 };
