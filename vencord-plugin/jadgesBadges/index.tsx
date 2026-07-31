@@ -4,6 +4,8 @@
  * into the Jadges directory or intercepting unrelated DM/status clicks.
  */
 
+import definePlugin from "@utils/types";
+
 import basePlugin from "./base";
 import { startUpdateChecker, stopUpdateChecker } from "./updater";
 
@@ -168,9 +170,12 @@ async function startWithoutGlobalBadgeClick(): Promise<void> {
     }
 }
 
-export default {
-    ...(basePlugin as any),
+export default definePlugin({
+    name: "JadgesBadges",
     description: "Displays Jadges badges, rearranges native Discord badges, and installs verified Jadges updates.",
+    authors: [{ name: "Jaycord", id: 0n }],
+    dependencies: ["BadgeAPI"],
+    options: (basePlugin as any).options,
     start: startWithoutGlobalBadgeClick,
     stop() {
         try {
@@ -180,4 +185,4 @@ export default {
             restoreGuards();
         }
     }
-};
+});
