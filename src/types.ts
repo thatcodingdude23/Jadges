@@ -11,6 +11,14 @@ export type NitroPreset =
 
 export type BadgeSide = "left" | "right";
 
+export interface NativeBadgeObservation {
+  /** Stable client-generated key beginning with discord:. */
+  key: string;
+  name: string;
+  image: string;
+  updatedAt: string;
+}
+
 export interface BadgeRecord {
   id: string;
   userId: string;
@@ -38,9 +46,14 @@ export interface UserRecord {
   badges: BadgeRecord[];
   nitro?: NitroRecord;
   pendingNitro?: NitroRecord;
-  /** Ordered keys such as custom:<badge id> and nitro. Jaycord Staff stays pinned first. */
+  /**
+   * Ordered keys such as custom:<badge id>, nitro, and discord:<native badge>.
+   * Jaycord Staff remains pinned first.
+   */
   badgeOrder?: string[];
   badgeSide?: BadgeSide;
+  /** Native Discord badges last observed by an updated Jadges client. */
+  nativeBadges?: NativeBadgeObservation[];
 }
 
 export interface StoreData {
@@ -60,6 +73,12 @@ export interface PublicNitroPreset {
   hideNativeBadges?: boolean;
 }
 
+export interface PublicNativeBadge {
+  key: string;
+  name: string;
+  image: string;
+}
+
 export interface PublicBadge {
   key: string;
   name: string;
@@ -69,4 +88,10 @@ export interface PublicBadge {
   createdAt?: string;
   side?: BadgeSide;
   nitro?: PublicNitroPreset;
+  /** Settings-only record consumed by the Jadges clients. */
+  metadata?: boolean;
+  /** Complete order, including native Discord badge keys. */
+  order?: string[];
+  /** Native Discord badges observed by a Jadges client. */
+  nativeBadges?: PublicNativeBadge[];
 }
