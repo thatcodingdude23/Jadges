@@ -22,6 +22,11 @@ import {
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import {
+  isNitroPreset,
+  NITRO_PRESET_CHOICES,
+  NITRO_PRESETS,
+} from "./presets.js";
+import {
   addPendingBadge,
   approveBadge,
   getUser,
@@ -56,6 +61,13 @@ const command = new SlashCommandBuilder()
           .setName("image")
           .setDescription("PNG, JPG, WEBP, GIF, or APNG image")
           .setRequired(true),
+      )
+      .addStringOption((option) =>
+        option
+          .setName("preset")
+          .setDescription("Optional Nitro badge preset shown by the Jadges plugin")
+          .addChoices(...NITRO_PRESET_CHOICES)
+          .setRequired(false),
       ),
   )
   .addSubcommand((subcommand) =>
@@ -123,6 +135,12 @@ function cleanName(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }
 
+function presetLabel(badge: BadgeRecord): string | undefined {
+  return badge.nitroPreset
+    ? `${NITRO_PRESETS[badge.nitroPreset].label} Nitro`
+    : undefined;
+}
+
 function reviewDmContainer(
   badge: BadgeRecord,
   outcome: "approved" | "denied",
@@ -131,15 +149,21 @@ function reviewDmContainer(
   const heading = approved
     ? "## Your badge got accepted!"
     : "## Your badge was denied";
+  const preset = presetLabel(badge);
   const message = approved
     ? "After review, a member of the staff team has approved your badge. It is now equipped on your profile. Refresh or restart Discord to see it. Other users with the Jadges plugin installed will also be able to see your badge."
     : "After review, a member of the staff team has decided not to approve your badge. It has not been equipped on your profile. You may submit a new badge that follows the server's badge guidelines.";
+  const presetMessage = preset
+    ? approved
+      ? `\n**Nitro preset:** ${preset} is now applied through Jadges.`
+      : `\n**Nitro preset:** ${preset} was not applied.`
+    : "";
 
   return new ContainerBuilder()
     .setAccentColor(approved ? 0x57f287 : 0xed4245)
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `${heading}\n${message}\n\n**Badge:** ${badge.name}`,
+        `${heading}\n${message}\n\n**Badge:** ${badge.name}${presetMessage}`,
       ),
       new TextDisplayBuilder().setContent("-# Jadges • Badge review update"),
     );
@@ -171,13 +195,17 @@ async function sendVerification(
     throw new Error("PROMPT_CHANNEL must point to a text channel");
   }
 
+  const fields = [
+    { name: "Badge name", value: badge.name },
+    { name: "Badge ID", value: badge.id },
+  ];
+  const preset = presetLabel(badge);
+  if (preset) fields.push({ name: "Nitro preset", value: preset });
+
   const embed = new EmbedBuilder()
     .setTitle("Badge approval request")
     .setDescription(`Submitted by <@${badge.userId}>`)
-    .addFields(
-      { name: "Badge name", value: badge.name },
-      { name: "Badge ID", value: badge.id },
-    )
+    .addFields(fields)
     .setImage(publicImageUrl(badge.filename))
     .setColor(0xf0b232)
     .setTimestamp(new Date(badge.createdAt));
@@ -219,6 +247,8 @@ async function createBadge(
   const name = cleanName(interaction.options.getString("name", true));
   const attachment = interaction.options.getAttachment("image", true) as Attachment;
   const contentType = attachment.contentType?.split(";")[0] || "";
+  const requestedPreset = interaction.options.getString("preset");
+  const nitroPreset = isNitroPreset(requestedPreset) ? requestedPreset : undefined;
 
   if (!name || config.blacklistedWords.some((word) => name.toLowerCase().includes(word))) {
     await interaction.editReply("That badge name is not allowed.");
@@ -248,10 +278,15 @@ async function createBadge(
       mimeType: stored.mimeType,
       pending: true,
       createdAt: new Date().toISOString(),
+      ...(nitroPreset ? { nitroPreset } : {}),
     };
     await addPendingBadge(badge);
     await sendVerification(client, interaction, badge);
-    await interaction.editReply("Badge saved and sent for approval.");
+    await interaction.editReply(
+      nitroPreset
+        ? `Badge saved and sent for approval with the ${NITRO_PRESETS[nitroPreset].label} Nitro preset.`
+        : "Badge saved and sent for approval.",
+    );
   } catch (error) {
     console.error("Badge submission failed:", error);
     if (badge) {
@@ -282,7 +317,11 @@ async function listBadges(interaction: ChatInputCommandInteraction): Promise<voi
   const user = await getUser(target.id);
   const description = user.badges.length
     ? user.badges
-        .map((badge) => `• **${badge.name}**${badge.pending ? " — pending" : ""}`)
+        .map((badge) => {
+          const status = badge.pending ? " — pending" : "";
+          const preset = presetLabel(badge);
+          return `• **${badge.name}**${status}${preset ? ` — ${preset}` : ""}`;
+        })
         .join("\n")
     : "No badges found.";
 
