@@ -7,6 +7,8 @@
   let badgeData = {};
   let unpatch;
   let refreshTimer;
+  const badgeProps = Object.create(null);
+  const jsxUnpatches = [];
 
   async function refreshBadges() {
     try {
@@ -30,7 +32,52 @@
     }
   }
 
+  function profileBadgeCallback(_component, element) {
+    const id = element?.props?.id;
+    const props = badgeProps[id];
+
+    if (props) {
+      element.props.source = props.source;
+      element.props.label = props.label;
+      element.props.id = props.id;
+    }
+
+    return element;
+  }
+
+  function renderBadgeCallback(_component, element) {
+    const id = element?.props?.id;
+    const props = badgeProps[id];
+
+    if (props) {
+      Object.assign(element.props, props);
+    }
+
+    return element;
+  }
+
+  function installImageHooks() {
+    const jsxApi = globalThis.bunny?.api?.react?.jsx;
+
+    if (
+      typeof jsxApi?.onJsxCreate !== "function" ||
+      typeof jsxApi?.deleteJsxCreate !== "function"
+    ) {
+      vendetta.logger.warn("[JadgesBadges] Revenge JSX API was not found");
+      return;
+    }
+
+    jsxApi.onJsxCreate("ProfileBadge", profileBadgeCallback);
+    jsxApi.onJsxCreate("RenderBadge", renderBadgeCallback);
+
+    jsxUnpatches.push(
+      () => jsxApi.deleteJsxCreate("ProfileBadge", profileBadgeCallback),
+      () => jsxApi.deleteJsxCreate("RenderBadge", renderBadgeCallback)
+    );
+  }
+
   function onLoad() {
+    installImageHooks();
     void refreshBadges();
 
     try {
@@ -60,12 +107,23 @@
                 typeof item.badge === "string" &&
                 item.badge.startsWith("https://")
             )
-            .map((item, index) => ({
-              id: `jadges-${userId}-${index}`,
-              iconSrc: item.badge,
-              icon: item.badge,
-              description: item.tooltip || item.name || "Jadges Badge"
-            }));
+            .map((item, index) => {
+              const id = `jadges-${userId}-${index}`;
+              const label = item.tooltip || item.name || "Jadges Badge";
+
+              badgeProps[id] = {
+                id,
+                source: { uri: item.badge },
+                label,
+                userId
+              };
+
+              return {
+                id,
+                description: label,
+                icon: " _"
+              };
+            });
 
           return [
             ...(Array.isArray(originalBadges) ? originalBadges : []),
@@ -85,9 +143,19 @@
     unpatch?.();
     unpatch = undefined;
 
+    for (const removeHook of jsxUnpatches.splice(0)) {
+      try {
+        removeHook();
+      } catch {}
+    }
+
     clearInterval(refreshTimer);
     refreshTimer = undefined;
     badgeData = {};
+
+    for (const id of Object.keys(badgeProps)) {
+      delete badgeProps[id];
+    }
   }
 
   return {
