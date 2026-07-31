@@ -1,9 +1,9 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { config } from "./config.js";
-import { setObservedNativeBadges } from "./nativeStore.js";
 import { NITRO_PRESETS } from "./presets.js";
 import { publicImageUrl } from "./storage.js";
+import { setObservedNativeBadges } from "./nativeStore.js";
 import {
   getUser,
   readStore,
@@ -59,6 +59,12 @@ interface RearrangePageData {
   side?: BadgeSide;
   hasNativeBadges: boolean;
 }
+
+type SystemStaffBadge = "staff" | "admin";
+type ResolveSystemStaffBadge = (
+  userId: string,
+  user: UserRecord,
+) => SystemStaffBadge | undefined;
 
 interface PublicBadgeSettings {
   side?: BadgeSide;
@@ -280,6 +286,7 @@ function renderRearrangePage(ticket: string, data: RearrangePageData): string {
        const status = document.getElementById("status");
        const side = document.getElementById("badge-side");
        let draggingKey = null;
+       let saving = false;
 
        side.value = state.side || "";
 
@@ -289,17 +296,24 @@ function renderRearrangePage(ticket: string, data: RearrangePageData): string {
        }
 
        async function save(patch) {
+         if (saving) throw new Error("A badge change is already being saved.");
+         saving = true;
          setStatus("Saving…");
-         const response = await fetch("/api/rearrange?ticket=" + encodeURIComponent(ticket), {
-           method: "POST",
-           headers: { "content-type": "application/json" },
-           credentials: "same-origin",
-           body: JSON.stringify(patch)
-         });
-         const body = await response.json().catch(() => ({}));
-         if (!response.ok) throw new Error(body.error || "Could not save changes");
-         state = body;
-         setStatus("Saved instantly.");
+
+         try {
+           const response = await fetch("/api/rearrange?ticket=" + encodeURIComponent(ticket), {
+             method: "POST",
+             headers: { "content-type": "application/json" },
+             credentials: "same-origin",
+             body: JSON.stringify(patch)
+           });
+           const body = await response.json().catch(() => ({}));
+           if (!response.ok) throw new Error(body.error || "Could not save changes");
+           state = body;
+           setStatus("Saved instantly.");
+         } finally {
+           saving = false;
+         }
        }
 
        function render() {
@@ -359,13 +373,17 @@ function renderRearrangePage(ticket: string, data: RearrangePageData): string {
              const to = state.order.indexOf(badge.key);
              if (from === -1 || to === -1) return;
 
+             const previousOrder = [...state.order];
              [state.order[from], state.order[to]] = [state.order[to], state.order[from]];
              render();
+
              try {
                await save({ order: state.order });
+               render();
              } catch (error) {
-               setStatus(error.message, true);
-               location.reload();
+               state.order = previousOrder;
+               render();
+               setStatus(error instanceof Error ? error.message : "Could not save changes", true);
              }
            });
 
@@ -386,7 +404,8 @@ function renderRearrangePage(ticket: string, data: RearrangePageData): string {
          try {
            await save({ side: value });
          } catch (error) {
-           setStatus(error.message, true);
+           side.value = state.side || "";
+           setStatus(error instanceof Error ? error.message : "Could not save placement", true);
          }
        });
 
@@ -430,16 +449,18 @@ function orderedMovableKeys(user: UserRecord): string[] {
 async function buildPageData(
   userId: string,
   origin: string,
-  isJaycordStaff: boolean,
+  resolveSystemStaffBadge: ResolveSystemStaffBadge,
 ): Promise<RearrangePageData> {
   const user = await getUser(userId);
   const badges: RearrangeBadge[] = [];
+  const systemStaffBadge = resolveSystemStaffBadge(userId, user);
 
-  if (isJaycordStaff) {
+  if (systemStaffBadge) {
+    const isAdmin = systemStaffBadge === "admin";
     badges.push({
       key: "staff",
-      name: "Jaycord Staff",
-      image: config.jaycordStaffBadgeUrl,
+      name: isAdmin ? "Jaycord Admin" : "Jaycord Staff",
+      image: isAdmin ? config.jaycordAdminBadgeUrl : config.jaycordStaffBadgeUrl,
       movable: false,
       subtitle: "Pinned first",
     });
@@ -595,7 +616,7 @@ export async function handleRearrangeRequest(
   response: ServerResponse,
   url: URL,
   origin: string,
-  isJaycordStaff: (userId: string) => boolean,
+  resolveSystemStaffBadge: ResolveSystemStaffBadge,
 ): Promise<boolean> {
   if (url.pathname === "/settings.json") {
     if (request.method !== "GET") {
@@ -651,7 +672,7 @@ export async function handleRearrangeRequest(
     const data = await buildPageData(
       ticket.userId,
       origin,
-      isJaycordStaff(ticket.userId),
+      resolveSystemStaffBadge,
     );
     sendHtml(response, 200, renderRearrangePage(ticketToken, data));
     return true;
@@ -765,7 +786,7 @@ export async function handleRearrangeRequest(
       sendJson(
         response,
         200,
-        await buildPageData(ticket.userId, origin, isJaycordStaff(ticket.userId)),
+        await buildPageData(ticket.userId, origin, resolveSystemStaffBadge),
       );
       return true;
     }
@@ -789,15 +810,22 @@ export async function handleRearrangeRequest(
         if (!Array.isArray(body.order) || !body.order.every((item) => typeof item === "string")) {
           throw new Error("Invalid badge order");
         }
-        const expected = orderedMovableKeys(user).sort();
-        const supplied = [...new Set(body.order)].sort();
-        if (
-          supplied.length !== expected.length ||
-          supplied.some((value, index) => value !== expected[index])
-        ) {
-          throw new Error("Badge order does not match your current badges");
+        const available = orderedMovableKeys(user);
+        const availableSet = new Set(available);
+        const supplied = [...new Set(body.order)];
+
+        if (supplied.some((value) => !availableSet.has(value))) {
+          throw new Error("One of those badges is no longer available");
         }
-        await setBadgeOrder(ticket.userId, body.order);
+
+        // A profile can detect another native badge while this page is open.
+        // Preserve the submitted order and append newly detected badges instead
+        // of rejecting the whole save.
+        const mergedOrder = [
+          ...supplied,
+          ...available.filter((value) => !supplied.includes(value)),
+        ];
+        await setBadgeOrder(ticket.userId, mergedOrder);
       }
 
       if (body.side !== undefined) {
@@ -810,7 +838,7 @@ export async function handleRearrangeRequest(
       sendJson(
         response,
         200,
-        await buildPageData(ticket.userId, origin, isJaycordStaff(ticket.userId)),
+        await buildPageData(ticket.userId, origin, resolveSystemStaffBadge),
       );
     } catch (error) {
       sendJson(response, 400, {
