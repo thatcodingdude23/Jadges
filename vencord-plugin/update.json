@@ -1,0 +1,29 @@
+{
+  "version": 12,
+  "files": [
+    {
+      "path": "index.tsx",
+      "sha256": "ca7c3756454858d710db56b6519b345b5b38742db582e241e1b70b87dbe3a0b8"
+    },
+    {
+      "path": "base.tsx",
+      "sha256": "5abc6c13b3ea87c1ae175b7fd66bcf1aee656325d57b9a1de920d868356c55ed"
+    },
+    {
+      "path": "native.ts",
+      "sha256": "951f1f9058bc9e566c6142c252743cea47832d32d61efb003e48a8b1045e8f7d"
+    },
+    {
+      "path": "style.css",
+      "sha256": "ee44c6e36f3d76be594dc579e99b0156afc06092b272a5f3a2f6b559af02a310"
+    },
+    {
+      "path": "updater.ts",
+      "sha256": "423c1a1269c06a1ed97f333f94728dc0bc38f844d746a90b32fb09d6b5d3e529"
+    },
+    {
+      "path": "updateNative.ts",
+      "sha256": "f7b44cd4cc8bdf65adac01d6afa27d66df7557d60471ee59ad540d0ffd790808"
+    }
+  ]
+}
