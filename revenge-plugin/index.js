@@ -2,13 +2,17 @@
   "use strict";
 
   const API_URL = "https://jadges.onrender.com/badges.json";
+  const API_ROOT = API_URL.replace(/\/badges\.json(?:\?.*)?$/, "");
   const REFRESH_INTERVAL = 5_000;
+  const NATIVE_REPORT_INTERVAL = 60_000;
 
   let badgeData = {};
+  let settingsData = {};
   let unpatch;
   let refreshTimer;
   const badgeProps = Object.create(null);
   const jsxUnpatches = [];
+  const reportedNative = new Map();
 
   function formatDate(value) {
     const date = new Date(value);
@@ -20,19 +24,31 @@
     }).format(date);
   }
 
+  function getSettings(userId, jadges) {
+    const stored = settingsData[userId];
+
+    return {
+      side:
+        stored?.side === "right" ||
+        (!stored?.side && jadges?.some(item => item?.side === "right"))
+          ? "right"
+          : "left",
+      order: Array.isArray(stored?.order)
+        ? stored.order.filter(value => typeof value === "string")
+        : [],
+      nativeBadges: Array.isArray(stored?.nativeBadges)
+        ? stored.nativeBadges
+        : []
+    };
+  }
+
   function getNitroPreset(jadges) {
     if (!Array.isArray(jadges)) return undefined;
     return jadges.find(item => item?.nitro)?.nitro;
   }
 
-  function getBadgeSide(jadges) {
-    return Array.isArray(jadges) && jadges.some(item => item?.side === "right")
-      ? "right"
-      : "left";
-  }
-
-  function badgeText(badge) {
-    if (!badge || typeof badge !== "object") return "";
+  function stringValues(badge) {
+    if (!badge || typeof badge !== "object") return [];
     return [
       badge.id,
       badge.key,
@@ -43,19 +59,23 @@
       badge.link,
       badge.href,
       badge.icon,
-      badge.iconSrc
-    ]
-      .filter(value => typeof value === "string")
-      .join(" ")
-      .toLowerCase();
+      badge.iconSrc,
+      badge.source?.uri,
+      badge.iconSource?.uri,
+      badge.imageSource?.uri
+    ].filter(value => typeof value === "string" && value.length > 0);
+  }
+
+  function badgeText(badge) {
+    return stringValues(badge).join(" ").toLowerCase();
   }
 
   function isNitroBadge(badge) {
     const text = badgeText(badge);
     return (
-      text.includes("subscriber") ||
+      text.includes("subscriber since") ||
       text.includes("settings/premium") ||
-      text.includes("nitro")
+      text.includes("discord nitro")
     );
   }
 
@@ -67,6 +87,84 @@
       text.includes("premium guild subscriber") ||
       text.includes("51040c70d4f20a921ad6674ff86fc95c")
     );
+  }
+
+  function slug(value) {
+    return String(value || "")
+      .toLowerCase()
+      .replace(/^https?:\/\//, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 72);
+  }
+
+  function nativeBadgeKey(badge) {
+    const values = stringValues(badge);
+
+    if (isServerBoostBadge(badge)) return "discord:boosting";
+    if (isNitroBadge(badge)) return "discord:nitro";
+
+    const image = values.find(value => /^https:\/\//i.test(value));
+    const hash = image?.match(/(?:badge-icons|assets\/content)\/([a-z0-9_-]{8,})/i)?.[1];
+    if (hash) return `discord:icon-${hash.toLowerCase()}`;
+
+    const seed = values.find(value => value.trim().length > 0);
+    const normalized = slug(seed);
+    return normalized ? `discord:${normalized}` : undefined;
+  }
+
+  function nativeBadgeImage(badge) {
+    return stringValues(badge).find(value => /^https:\/\//i.test(value));
+  }
+
+  function nativeBadgeName(badge) {
+    const values = stringValues(badge);
+    const preferred = values.find(value =>
+      !/^https:\/\//i.test(value) &&
+      !value.startsWith("/") &&
+      value.trim().length > 0
+    );
+    return String(preferred || "Discord Badge").trim().slice(0, 100);
+  }
+
+  async function reportNativeBadges(userId, originalBadges) {
+    const unique = new Map();
+
+    for (const badge of Array.isArray(originalBadges) ? originalBadges : []) {
+      const key = nativeBadgeKey(badge);
+      const image = nativeBadgeImage(badge);
+      if (!key || !image || unique.has(key)) continue;
+      unique.set(key, {
+        key,
+        name: nativeBadgeName(badge),
+        image
+      });
+    }
+
+    const badges = [...unique.values()].slice(0, 25);
+    const signature = JSON.stringify(badges);
+    const previous = reportedNative.get(userId);
+    const now = Date.now();
+
+    if (
+      previous &&
+      previous.signature === signature &&
+      now - previous.reportedAt < NATIVE_REPORT_INTERVAL
+    ) {
+      return;
+    }
+
+    reportedNative.set(userId, { signature, reportedAt: now });
+
+    try {
+      await vendetta.utils.safeFetch(`${API_ROOT}/api/native-badges`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId, badges })
+      });
+    } catch (error) {
+      vendetta.logger.warn("[JadgesBadges] Could not report native badges", error);
+    }
   }
 
   function registerImage(id, image, label, userId, extra = {}) {
@@ -84,15 +182,24 @@
 
   async function refreshBadges() {
     try {
-      const response = await vendetta.utils.safeFetch(API_URL, {
-        cache: "no-store"
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const json = await response.json();
+      const [badgeResponse, settingsResponse] = await Promise.all([
+        vendetta.utils.safeFetch(API_URL, { cache: "no-store" }),
+        vendetta.utils.safeFetch(`${API_ROOT}/settings.json`, { cache: "no-store" })
+      ]);
+
+      if (!badgeResponse.ok) throw new Error(`HTTP ${badgeResponse.status}`);
+      const json = await badgeResponse.json();
       if (!json || typeof json !== "object" || Array.isArray(json)) {
         throw new TypeError("Invalid Jadges API response");
       }
       badgeData = json;
+
+      if (settingsResponse.ok) {
+        const settings = await settingsResponse.json();
+        if (settings && typeof settings === "object" && !Array.isArray(settings)) {
+          settingsData = settings;
+        }
+      }
     } catch (error) {
       vendetta.logger.error("[JadgesBadges] Failed to refresh badges", error);
     }
@@ -123,14 +230,52 @@
     );
   }
 
-  function makeImageBadge(id, image, label, userId, extra = {}) {
-    registerImage(id, image, label, userId, extra);
+  function makeImageBadge(id, orderKey, image, label, userId, extra = {}) {
+    registerImage(id, image, label, userId, {
+      orderKey,
+      ...extra
+    });
     return {
       id,
       description: label,
       icon: image,
-      source: { uri: image }
+      source: { uri: image },
+      __jadgesOrderKey: orderKey
     };
+  }
+
+  function orderedCombinedBadges(userId, jadges, syntheticBadges, discordBadges) {
+    const settings = getSettings(userId, jadges);
+    const rank = new Map(settings.order.map((key, index) => [key, index]));
+
+    const entries = [
+      ...syntheticBadges.map((badge, index) => ({
+        badge,
+        key: badge.__jadgesOrderKey,
+        isJadges: true,
+        index
+      })),
+      ...discordBadges.map((badge, index) => ({
+        badge,
+        key: nativeBadgeKey(badge),
+        isJadges: false,
+        index
+      }))
+    ];
+
+    const score = entry => {
+      if (entry.key === "staff") return -100000;
+      const explicit = entry.key ? rank.get(entry.key) : undefined;
+      if (explicit !== undefined) return explicit;
+      const group = settings.side === "left"
+        ? (entry.isJadges ? 0 : 1)
+        : (entry.isJadges ? 1 : 0);
+      return 100000 + group * 10000 + entry.index;
+    };
+
+    return entries
+      .sort((left, right) => score(left) - score(right))
+      .map(entry => entry.badge);
   }
 
   function onLoad() {
@@ -151,6 +296,8 @@
           const userId = user?.userId ?? user?.id;
           if (!userId) return originalBadges;
 
+          void reportNativeBadges(userId, originalBadges);
+
           const jadges = badgeData[userId];
           if (!Array.isArray(jadges) || jadges.length === 0) return originalBadges;
 
@@ -160,7 +307,7 @@
           const syntheticBadges = [];
 
           jadges.forEach((item, index) => {
-            if (!item || typeof item !== "object") return;
+            if (!item || typeof item !== "object" || item.metadata) return;
 
             if (item.nitro) {
               if (hideNativeBadges) return;
@@ -174,10 +321,17 @@
               const id = `jadges-nitro-${userId}-${index}`;
               const label = `Subscriber since ${formatDate(item.nitro.subscriberSince)}`;
               syntheticBadges.push(
-                makeImageBadge(id, mobileIcon, label, userId, {
-                  nitro: item.nitro,
-                  originalProfileIcon: item.nitro.profileIcon
-                })
+                makeImageBadge(
+                  id,
+                  item.key || "nitro",
+                  mobileIcon,
+                  label,
+                  userId,
+                  {
+                    nitro: item.nitro,
+                    originalProfileIcon: item.nitro.profileIcon
+                  }
+                )
               );
               return;
             }
@@ -186,10 +340,14 @@
             const id = `jadges-${userId}-${index}`;
             const label = item.tooltip || item.name || "Jadges Badge";
             syntheticBadges.push(
-              makeImageBadge(id, item.badge, label, userId, {
-                createdAt: item.createdAt,
-                apiKey: item.key
-              })
+              makeImageBadge(
+                id,
+                item.key || `custom:${index}`,
+                item.badge,
+                label,
+                userId,
+                { createdAt: item.createdAt }
+              )
             );
           });
 
@@ -201,14 +359,12 @@
               return !nitro || !isNitroBadge(badge);
             });
 
-          return getBadgeSide(jadges) === "right"
-            ? [...discordBadges, ...syntheticBadges]
-            : [...syntheticBadges, ...discordBadges];
+          return orderedCombinedBadges(userId, jadges, syntheticBadges, discordBadges);
         }
       );
 
       refreshTimer = setInterval(() => void refreshBadges(), REFRESH_INTERVAL);
-      vendetta.logger.log("[JadgesBadges] Enabled with badge ordering and placement");
+      vendetta.logger.log("[JadgesBadges] Enabled with native Discord badge ordering");
     } catch (error) {
       vendetta.logger.error("[JadgesBadges] Failed to start", error);
     }
@@ -223,6 +379,8 @@
     clearInterval(refreshTimer);
     refreshTimer = undefined;
     badgeData = {};
+    settingsData = {};
+    reportedNative.clear();
     for (const id of Object.keys(badgeProps)) delete badgeProps[id];
   }
 
