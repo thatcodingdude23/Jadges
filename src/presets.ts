@@ -28,7 +28,7 @@ export const NITRO_PRESETS: Record<NitroPreset, NitroPresetDefinition> = {
     label: "Gold",
     months: 6,
     profileIcon: "https://cdn.discordapp.com/assets/content/3b2f45966655f984d8281007eb28616801fb16bbe5dd3bf22dc1f34a9c946610.svg",
-    hoverImage: "https://discord.fandom.com/wiki/Special:Redirect/file/Nitro_Badge_Gold.png",
+    hoverImage: "https://cdn.discordapp.com/assets/content/1518ef16d0790bcc0d2a409db2e71a25d7b8726703150612a9b06b45219f4066.png",
   },
   platinum: {
     key: "platinum",
