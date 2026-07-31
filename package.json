@@ -1,0 +1,23 @@
+{
+  "name": "jadges",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Discord custom badge bot and API with Render persistent-disk storage",
+  "type": "module",
+  "scripts": {
+    "dev": "node --experimental-strip-types --env-file=.env src/main.ts",
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "check": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "discord.js": "^14.26.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "typescript": "^5.8.3"
+  }
+}

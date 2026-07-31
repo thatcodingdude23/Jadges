@@ -1,0 +1,15 @@
+{
+  "name": "Jadges Badges",
+  "description": "Displays approved Jadges badges in Discord's native mobile profile badge row.",
+  "authors": [
+    {
+      "name": "Jaycord",
+      "id": "0"
+    }
+  ],
+  "main": "index.js",
+  "vendetta": {
+    "icon": "ic_badge_staff"
+  },
+  "hash": "24d1743c3af9b3f863d58fb50e7c7d0d44a8dc7058ac551926b2a874402ced08"
+}
