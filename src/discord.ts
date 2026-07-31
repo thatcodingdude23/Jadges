@@ -100,6 +100,17 @@ const command = new SlashCommandBuilder()
       ),
   );
 
+const botPresence = {
+  status: "dnd" as const,
+  afk: false,
+  activities: [
+    {
+      name: "Badges being made",
+      type: ActivityType.Watching,
+    },
+  ],
+};
+
 function hasVerifierRole(interaction: ChatInputCommandInteraction | ButtonInteraction): boolean {
   return (
     interaction.inCachedGuild() &&
@@ -370,18 +381,12 @@ export async function startDiscordBot(): Promise<Client> {
   await rest.put(route, { body: [command.toJSON()] });
   console.log(`Registered ${config.guildId ? "guild" : "global"} slash commands.`);
 
-  const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+  const client = new Client({
+    intents: [GatewayIntentBits.Guilds],
+    presence: botPresence,
+  });
   client.once(Events.ClientReady, (readyClient) => {
-    readyClient.user.setPresence({
-      status: "dnd",
-      activities: [
-        {
-          name: "Badges seem interesting...",
-          state: "Badges seem interesting...",
-          type: ActivityType.Custom,
-        },
-      ],
-    });
+    readyClient.user.setPresence(botPresence);
     console.log(`Discord bot connected as ${readyClient.user.tag}`);
   });
   client.on(Events.InteractionCreate, async (interaction) => {
