@@ -10,6 +10,54 @@
   const badgeProps = Object.create(null);
   const jsxUnpatches = [];
 
+  function formatDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "Unknown";
+
+    return new Intl.DateTimeFormat("en-US", {
+      month: "2-digit",
+      day: "2-digit",
+      year: "2-digit"
+    }).format(date);
+  }
+
+  function getNitroPreset(jadges) {
+    if (!Array.isArray(jadges)) return undefined;
+    return jadges.find(item => item?.nitro)?.nitro;
+  }
+
+  function isNitroBadge(badge) {
+    if (!badge || typeof badge !== "object") return false;
+
+    const text = [
+      badge.id,
+      badge.key,
+      badge.description,
+      badge.label,
+      badge.link,
+      badge.href
+    ]
+      .filter(value => typeof value === "string")
+      .join(" ")
+      .toLowerCase();
+
+    return (
+      text.includes("subscriber since") ||
+      text.includes("settings/premium") ||
+      text.includes("nitro")
+    );
+  }
+
+  function registerImage(id, image, label, userId, extra = {}) {
+    badgeProps[id] = {
+      id,
+      source: { uri: image },
+      label,
+      userId,
+      ...extra
+    };
+  }
+
   async function refreshBadges() {
     try {
       const response = await vendetta.utils.safeFetch(API_URL, {
@@ -100,6 +148,49 @@
             return originalBadges;
           }
 
+          const output = Array.isArray(originalBadges)
+            ? originalBadges.map(badge => ({ ...badge }))
+            : [];
+          const nitro = getNitroPreset(jadges);
+
+          if (
+            nitro &&
+            typeof nitro.profileIcon === "string" &&
+            nitro.profileIcon.startsWith("https://")
+          ) {
+            const nitroLabel = `Subscriber since ${formatDate(nitro.subscriberSince)}`;
+            let replaced = false;
+
+            for (let index = 0; index < output.length; index += 1) {
+              const badge = output[index];
+              if (replaced || !isNitroBadge(badge)) continue;
+
+              const id = badge?.id || `jadges-nitro-${userId}`;
+              registerImage(id, nitro.profileIcon, nitroLabel, userId, {
+                nitro
+              });
+              output[index] = {
+                ...badge,
+                id,
+                description: nitroLabel,
+                icon: " _"
+              };
+              replaced = true;
+            }
+
+            if (!replaced) {
+              const id = `jadges-nitro-${userId}`;
+              registerImage(id, nitro.profileIcon, nitroLabel, userId, {
+                nitro
+              });
+              output.unshift({
+                id,
+                description: nitroLabel,
+                icon: " _"
+              });
+            }
+          }
+
           const customBadges = jadges
             .filter(
               item =>
@@ -111,12 +202,10 @@
               const id = `jadges-${userId}-${index}`;
               const label = item.tooltip || item.name || "Jadges Badge";
 
-              badgeProps[id] = {
-                id,
-                source: { uri: item.badge },
-                label,
-                userId
-              };
+              registerImage(id, item.badge, label, userId, {
+                createdAt: item.createdAt,
+                nitro: item.nitro
+              });
 
               return {
                 id,
@@ -125,15 +214,12 @@
               };
             });
 
-          return [
-            ...(Array.isArray(originalBadges) ? originalBadges : []),
-            ...customBadges
-          ];
+          return [...output, ...customBadges];
         }
       );
 
       refreshTimer = setInterval(() => void refreshBadges(), REFRESH_INTERVAL);
-      vendetta.logger.log("[JadgesBadges] Enabled");
+      vendetta.logger.log("[JadgesBadges] Enabled with Nitro presets");
     } catch (error) {
       vendetta.logger.error("[JadgesBadges] Failed to start", error);
     }
