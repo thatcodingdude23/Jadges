@@ -1,8 +1,15 @@
 {
   "name": "Jadges Badges",
-  "description": "Displays approved Jadges badges, custom ordering, optional Nitro presets, and native badge removal.",
-  "authors": [{ "name": "Jaycord", "id": "0" }],
+  "description": "Displays and rearranges Jadges and native Discord profile badges for Jadges users.",
+  "authors": [
+    {
+      "name": "Jaycord",
+      "id": "0"
+    }
+  ],
   "main": "index.js",
-  "vendetta": { "icon": "ic_badge_staff" },
-  "hash": "ef5657e85145bcc6df1ca093fc5ce7d447e3568989614a51fe7087c5c2f3ae42"
+  "vendetta": {
+    "icon": "ic_badge_staff"
+  },
+  "hash": "88a3df92f26eeb48040f1ae2b3c2aa2ce61e43b1f75610044cc78aa7bf787021"
 }
