@@ -17,12 +17,24 @@ export interface BadgeRecord {
   pending: boolean;
   createdAt: string;
   approvedAt?: string;
+  /** Legacy field kept so presets submitted before the separate command still work. */
   nitroPreset?: NitroPreset;
+}
+
+export interface NitroRecord {
+  id: string;
+  userId: string;
+  preset: NitroPreset;
+  pending: boolean;
+  createdAt: string;
+  approvedAt?: string;
 }
 
 export interface UserRecord {
   blocked: boolean;
   badges: BadgeRecord[];
+  nitro?: NitroRecord;
+  pendingNitro?: NitroRecord;
 }
 
 export interface StoreData {
