@@ -43,6 +43,6 @@ export interface PublicBadge {
   tooltip: string;
   badge: string;
   pending: false;
-  createdAt: string;
+  createdAt?: string;
   nitro?: PublicNitroPreset;
 }
