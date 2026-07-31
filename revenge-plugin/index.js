@@ -174,26 +174,23 @@
           const nitro = getNitroPreset(jadges);
           let nitroBadge;
 
-          if (nitro) {
-            const mobileIcon =
-              typeof nitro.hoverImage === "string" &&
-              nitro.hoverImage.startsWith("https://")
-                ? nitro.hoverImage
-                : nitro.profileIcon;
+          if (
+            nitro &&
+            typeof nitro.profileIcon === "string" &&
+            nitro.profileIcon.startsWith("https://")
+          ) {
+            const id = `jadges-nitro-${userId}`;
+            const label = `Subscriber since ${formatDate(nitro.subscriberSince)}`;
+            const mobileIcon = nitro.profileIcon;
 
-            if (typeof mobileIcon === "string" && mobileIcon.startsWith("https://")) {
-              const id = `jadges-nitro-${userId}`;
-              const label = `Subscriber since ${formatDate(nitro.subscriberSince)}`;
+            registerImage(id, mobileIcon, label, userId, { nitro });
 
-              registerImage(id, mobileIcon, label, userId, { nitro });
-
-              nitroBadge = {
-                id,
-                description: label,
-                icon: mobileIcon,
-                source: { uri: mobileIcon }
-              };
-            }
+            nitroBadge = {
+              id,
+              description: label,
+              icon: mobileIcon,
+              source: { uri: mobileIcon }
+            };
           }
 
           const discordBadges = (Array.isArray(originalBadges) ? originalBadges : [])
@@ -208,7 +205,7 @@
       );
 
       refreshTimer = setInterval(() => void refreshBadges(), REFRESH_INTERVAL);
-      vendetta.logger.log("[JadgesBadges] Enabled with PNG Nitro artwork");
+      vendetta.logger.log("[JadgesBadges] Enabled with Nitro profile badge icons");
     } catch (error) {
       vendetta.logger.error("[JadgesBadges] Failed to start", error);
     }
