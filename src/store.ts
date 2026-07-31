@@ -165,6 +165,34 @@ export async function removePendingNitro(requestId: string): Promise<NitroRecord
   });
 }
 
+export interface RemovedNitroState {
+  removedEquipped: boolean;
+  removedPending: boolean;
+  removedLegacy: boolean;
+}
+
+export async function removeNitroForUser(
+  userId: string,
+): Promise<RemovedNitroState> {
+  return mutateStore((data) => {
+    const user = getOrCreateUser(data, userId);
+    const removedEquipped = Boolean(user.nitro);
+    const removedPending = Boolean(user.pendingNitro);
+    let removedLegacy = false;
+
+    delete user.nitro;
+    delete user.pendingNitro;
+
+    for (const badge of user.badges) {
+      if (!badge.nitroPreset) continue;
+      delete badge.nitroPreset;
+      removedLegacy = true;
+    }
+
+    return { removedEquipped, removedPending, removedLegacy };
+  });
+}
+
 export async function setBlocked(userId: string, blocked: boolean): Promise<void> {
   await mutateStore((data) => {
     getOrCreateUser(data, userId).blocked = blocked;
