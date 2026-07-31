@@ -174,23 +174,32 @@
           const nitro = getNitroPreset(jadges);
           let nitroBadge;
 
-          if (
-            nitro &&
-            typeof nitro.profileIcon === "string" &&
-            nitro.profileIcon.startsWith("https://")
-          ) {
-            const id = `jadges-nitro-${userId}`;
-            const label = `Subscriber since ${formatDate(nitro.subscriberSince)}`;
-            const mobileIcon = nitro.profileIcon;
+          if (nitro) {
+            const mobileIcon =
+              typeof nitro.mobileIcon === "string" &&
+              nitro.mobileIcon.startsWith("https://")
+                ? nitro.mobileIcon
+                : nitro.profileIcon;
 
-            registerImage(id, mobileIcon, label, userId, { nitro });
+            if (
+              typeof mobileIcon === "string" &&
+              mobileIcon.startsWith("https://")
+            ) {
+              const id = `jadges-nitro-${userId}`;
+              const label = `Subscriber since ${formatDate(nitro.subscriberSince)}`;
 
-            nitroBadge = {
-              id,
-              description: label,
-              icon: mobileIcon,
-              source: { uri: mobileIcon }
-            };
+              registerImage(id, mobileIcon, label, userId, {
+                nitro,
+                originalProfileIcon: nitro.profileIcon
+              });
+
+              nitroBadge = {
+                id,
+                description: label,
+                icon: mobileIcon,
+                source: { uri: mobileIcon }
+              };
+            }
           }
 
           const discordBadges = (Array.isArray(originalBadges) ? originalBadges : [])
@@ -205,7 +214,7 @@
       );
 
       refreshTimer = setInterval(() => void refreshBadges(), REFRESH_INTERVAL);
-      vendetta.logger.log("[JadgesBadges] Enabled with Nitro profile badge icons");
+      vendetta.logger.log("[JadgesBadges] Enabled with mobile-safe Nitro profile icons");
     } catch (error) {
       vendetta.logger.error("[JadgesBadges] Failed to start", error);
     }
