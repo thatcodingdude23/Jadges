@@ -3,9 +3,14 @@ import { stat } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { config } from "./config.js";
+import { publicNitroPreset } from "./presets.js";
 import { publicImageUrl } from "./storage.js";
 import { readStore } from "./store.js";
-import type { PublicBadge } from "./types.js";
+import type {
+  BadgeRecord,
+  PublicBadge,
+  PublicNitroPreset,
+} from "./types.js";
 
 const allowedFile = /^[0-9a-f-]+\.(?:png|jpg|webp|gif|apng)$/i;
 
@@ -42,12 +47,40 @@ function requestOrigin(request: http.IncomingMessage): string {
   return config.publicUrl;
 }
 
-function toPublicBadge(name: string, filename: string, origin: string): PublicBadge {
+function activeNitroPreset(badges: BadgeRecord[]): PublicNitroPreset | undefined {
+  let selected: BadgeRecord | undefined;
+
+  for (const badge of badges) {
+    if (badge.pending || !badge.nitroPreset) continue;
+
+    const selectedTime = Date.parse(selected?.approvedAt || selected?.createdAt || "");
+    const badgeTime = Date.parse(badge.approvedAt || badge.createdAt);
+
+    if (!selected || !Number.isFinite(selectedTime) || badgeTime >= selectedTime) {
+      selected = badge;
+    }
+  }
+
+  if (!selected?.nitroPreset) return undefined;
+
+  return publicNitroPreset(
+    selected.nitroPreset,
+    selected.approvedAt || selected.createdAt,
+  );
+}
+
+function toPublicBadge(
+  badge: BadgeRecord,
+  origin: string,
+  nitro?: PublicNitroPreset,
+): PublicBadge {
   return {
-    name,
-    tooltip: name,
-    badge: publicImageUrl(filename, origin),
+    name: badge.name,
+    tooltip: badge.name,
+    badge: publicImageUrl(badge.filename, origin),
     pending: false,
+    createdAt: badge.createdAt,
+    ...(nitro ? { nitro } : {}),
   };
 }
 
@@ -108,9 +141,9 @@ export function startServer(): http.Server {
         const result: Record<string, PublicBadge[]> = {};
 
         for (const [userId, user] of Object.entries(data.users)) {
-          const badges = user.badges
-            .filter((badge) => !badge.pending)
-            .map((badge) => toPublicBadge(badge.name, badge.filename, origin));
+          const approved = user.badges.filter((badge) => !badge.pending);
+          const nitro = activeNitroPreset(approved);
+          const badges = approved.map((badge) => toPublicBadge(badge, origin, nitro));
           if (badges.length > 0) result[userId] = badges;
         }
 
@@ -126,9 +159,10 @@ export function startServer(): http.Server {
         }
 
         const data = await readStore();
-        const badges = (data.users[userId]?.badges || [])
-          .filter((badge) => !badge.pending)
-          .map((badge) => toPublicBadge(badge.name, badge.filename, origin));
+        const approved = (data.users[userId]?.badges || [])
+          .filter((badge) => !badge.pending);
+        const nitro = activeNitroPreset(approved);
+        const badges = approved.map((badge) => toPublicBadge(badge, origin, nitro));
         sendJson(response, 200, badges);
         return;
       }
