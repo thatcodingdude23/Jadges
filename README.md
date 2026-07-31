@@ -1,74 +1,57 @@
 # Jadges
 
-Jadges is a Discord custom-badge bot and public badge API inspired by GiBBy and Equibadges. It is designed for one Render web service with a persistent disk.
+Jadges is a custom Discord badge system that lets users submit their own profile badges and display approved badges directly on Discord profiles.
 
-## What it does
+## Supported clients
 
-- `/badge create` accepts an uploaded image and immediately saves it to the Render disk.
-- Staff approve or deny submissions with Discord buttons.
-- `/badge delete` and `/badge list` manage badges.
-- `/badge block` and `/badge unblock` are verifier-only commands.
-- `GET /badges.json` returns all approved badges.
-- `GET /users/:discordId` returns one user's approved badges.
-- `GET /badges/:filename` serves saved images.
-- Badge metadata is stored in `/var/data/badges.json`; images are stored in `/var/data/badges/`.
+Jadges works on both:
 
-MongoDB is not required. The persistent disk stores both the image files and the small JSON database.
+- **Vencord** — desktop
+- **Revenge** — Android
 
-## Discord setup
+Approved badges use the native Discord profile badge row, including the badge image and hover description.
 
-Create a Discord application and bot, then invite it with the `bot` and `applications.commands` scopes. The bot needs permission to view and send messages in the approval channel.
+## Features
 
-Keep the bot token, application ID, server ID, approval-channel ID, verifier-role ID, and blacklist configuration in private environment variables. Never commit their values to this repository.
+- Custom badge images and names
+- Native Discord profile badge display
+- Works across Vencord and Revenge
+- Staff approval and denial buttons
+- User badge limits
+- Extra badge slots for server boosters
+- Badge-name blacklist
+- Commands to create, delete, list, block, and unblock
+- Approved badges automatically sync between supported clients
 
-## Render deployment
-
-1. In Render, create a Blueprint from this repository using `render.yaml`.
-2. Use a paid web-service plan because persistent disks are not attached to free instances.
-3. Enter the private environment variables requested by Render.
-4. Set `PUBLIC_URL` to the final service URL, for example `https://jadges.onrender.com`.
-5. Keep the disk mounted at `/var/data`.
-
-Required private variables:
+## Commands
 
 ```text
-DISCORD_TOKEN
-CLIENT_ID
-GUILD_ID
-PROMPT_CHANNEL
-VERIFIER_ROLE
-PUBLIC_URL
-BLACKLISTED_WORDS
+/badge create
+/badge delete
+/badge list
+/badge block
+/badge unblock
 ```
 
-## API format
+## Vencord
 
-`GET /badges.json`
+Install the `JadgesBadges` userplugin in your Vencord source and rebuild Vencord. The plugin loads approved badges from the Jadges API and displays them using Discord's native badge system.
 
-```json
-{
-  "123456789012345678": [
-    {
-      "name": "Developer",
-      "tooltip": "Developer",
-      "badge": "https://your-service.onrender.com/badges/file.png",
-      "pending": false
-    }
-  ]
-}
+## Revenge
+
+Open Revenge's plugin settings, choose **Add Plugin**, and paste this source URL:
+
+```text
+https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/manifest.json
 ```
 
-The response includes both `name` and `tooltip`, making it easy to consume as a BadgeVault-style or Vencord/Equicord-style source.
+## How it works
 
-## Local development
+1. A user submits a badge with `/badge create`.
+2. Staff approve or deny the submission.
+3. Approved badges are added to the public Jadges badge list.
+4. The Vencord and Revenge plugins display the badge on that user's Discord profile.
 
-Create a local `.env` file containing the required private variables. The `.gitignore` prevents `.env` files, local data, keys, logs, and generated output from being committed.
+## Privacy
 
-```bash
-npm install
-npm run dev
-```
-
-## Important limitation
-
-This JSON-on-disk design is intended for one Render instance. Do not scale the service to multiple instances, because each instance cannot safely share the same mounted disk. For a large service or multiple instances, move the metadata to PostgreSQL or MongoDB and the images to object storage.
+Tokens, Discord IDs, private configuration, stored badge data, and local environment files are not included in this repository.
