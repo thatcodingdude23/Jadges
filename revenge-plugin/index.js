@@ -62,6 +62,7 @@
             )
             .map((item, index) => ({
               id: `jadges-${userId}-${index}`,
+              iconSrc: item.badge,
               icon: item.badge,
               description: item.tooltip || item.name || "Jadges Badge"
             }));
