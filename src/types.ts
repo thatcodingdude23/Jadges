@@ -6,7 +6,8 @@ export type NitroPreset =
   | "diamond"
   | "emerald"
   | "ruby"
-  | "opal";
+  | "opal"
+  | "remove";
 
 export interface BadgeRecord {
   id: string;
@@ -50,6 +51,8 @@ export interface PublicNitroPreset {
   mobileIcon?: string;
   hoverImage: string;
   subscriberSince: string;
+  /** Hides Discord's native Nitro and server-boosting profile badges. */
+  hideNativeBadges?: boolean;
 }
 
 export interface PublicBadge {
