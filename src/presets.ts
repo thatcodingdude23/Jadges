@@ -6,6 +6,7 @@ interface NitroPresetDefinition {
   months: number;
   profileIcon: string;
   hoverImage: string;
+  hideNativeBadges?: boolean;
 }
 
 export const NITRO_PRESETS: Record<NitroPreset, NitroPresetDefinition> = {
@@ -65,10 +66,18 @@ export const NITRO_PRESETS: Record<NitroPreset, NitroPresetDefinition> = {
     profileIcon: "https://cdn.discordapp.com/assets/content/0cb2f03c88887c7a8a31a348281ba835f6fbec76307f574c96f8ece87c8f7544.svg",
     hoverImage: "https://discord.fandom.com/wiki/Special:Redirect/file/Nitro_Badge_Opal.png",
   },
+  remove: {
+    key: "remove",
+    label: "Remove",
+    months: 0,
+    profileIcon: "https://cdn.discordapp.com/badge-icons/51040c70d4f20a921ad6674ff86fc95c.png",
+    hoverImage: "https://cdn.discordapp.com/badge-icons/51040c70d4f20a921ad6674ff86fc95c.png",
+    hideNativeBadges: true,
+  },
 };
 
 export const NITRO_PRESET_CHOICES = Object.values(NITRO_PRESETS).map((preset) => ({
-  name: `${preset.label} Nitro`,
+  name: preset.key === "remove" ? "Remove Nitro Badge" : `${preset.label} Nitro`,
   value: preset.key,
 }));
 
@@ -106,5 +115,6 @@ export function publicNitroPreset(
     profileIcon: preset.profileIcon,
     hoverImage: preset.hoverImage,
     subscriberSince: subtractUtcMonths(safeReference, preset.months).toISOString(),
+    hideNativeBadges: preset.hideNativeBadges,
   };
 }
