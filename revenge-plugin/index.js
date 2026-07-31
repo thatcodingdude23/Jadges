@@ -32,6 +32,8 @@
     const text = [
       badge.id,
       badge.key,
+      badge.name,
+      badge.title,
       badge.description,
       badge.label,
       badge.link,
@@ -42,17 +44,29 @@
       .toLowerCase();
 
     return (
-      text.includes("subscriber since") ||
+      text.includes("subscriber") ||
       text.includes("settings/premium") ||
       text.includes("nitro")
     );
   }
 
-  function registerImage(id, image, label, userId, extra = {}) {
+  function registerVisual(id, image, title, description, userId, extra = {}) {
+    const source = { uri: image };
+
     badgeProps[id] = {
       id,
-      source: { uri: image },
-      label,
+      icon: image,
+      source,
+      iconSource: source,
+      imageSource: source,
+      uri: image,
+      label: title,
+      title,
+      name: title,
+      description,
+      subtitle: description,
+      subtext: description,
+      accessibilityLabel: description ? `${title} ${description}` : title,
       userId,
       ...extra
     };
@@ -64,12 +78,9 @@
         cache: "no-store"
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
       const json = await response.json();
-
       if (!json || typeof json !== "object" || Array.isArray(json)) {
         throw new TypeError("Invalid Jadges API response");
       }
@@ -80,27 +91,12 @@
     }
   }
 
-  function profileBadgeCallback(_component, element) {
+  function applyRegisteredVisual(element) {
     const id = element?.props?.id;
     const props = badgeProps[id];
+    if (!props || !element?.props) return element;
 
-    if (props) {
-      element.props.source = props.source;
-      element.props.label = props.label;
-      element.props.id = props.id;
-    }
-
-    return element;
-  }
-
-  function renderBadgeCallback(_component, element) {
-    const id = element?.props?.id;
-    const props = badgeProps[id];
-
-    if (props) {
-      Object.assign(element.props, props);
-    }
-
+    Object.assign(element.props, props);
     return element;
   }
 
@@ -115,13 +111,12 @@
       return;
     }
 
-    jsxApi.onJsxCreate("ProfileBadge", profileBadgeCallback);
-    jsxApi.onJsxCreate("RenderBadge", renderBadgeCallback);
-
-    jsxUnpatches.push(
-      () => jsxApi.deleteJsxCreate("ProfileBadge", profileBadgeCallback),
-      () => jsxApi.deleteJsxCreate("RenderBadge", renderBadgeCallback)
-    );
+    for (const componentName of ["ProfileBadge", "RenderBadge"]) {
+      jsxApi.onJsxCreate(componentName, applyRegisteredVisual);
+      jsxUnpatches.push(() =>
+        jsxApi.deleteJsxCreate(componentName, applyRegisteredVisual)
+      );
+    }
   }
 
   function onLoad() {
@@ -148,9 +143,10 @@
             return originalBadges;
           }
 
-          const output = Array.isArray(originalBadges)
+          const discordBadges = Array.isArray(originalBadges)
             ? originalBadges.map(badge => ({ ...badge }))
             : [];
+
           const nitro = getNitroPreset(jadges);
 
           if (
@@ -158,35 +154,61 @@
             typeof nitro.profileIcon === "string" &&
             nitro.profileIcon.startsWith("https://")
           ) {
-            const nitroLabel = `Subscriber since ${formatDate(nitro.subscriberSince)}`;
+            const title = "SUBSCRIBER";
+            const description = `since ${formatDate(nitro.subscriberSince)}`;
             let replaced = false;
 
-            for (let index = 0; index < output.length; index += 1) {
-              const badge = output[index];
+            for (let index = 0; index < discordBadges.length; index += 1) {
+              const badge = discordBadges[index];
               if (replaced || !isNitroBadge(badge)) continue;
 
               const id = badge?.id || `jadges-nitro-${userId}`;
-              registerImage(id, nitro.profileIcon, nitroLabel, userId, {
-                nitro
-              });
-              output[index] = {
+              registerVisual(
+                id,
+                nitro.profileIcon,
+                title,
+                description,
+                userId,
+                { nitro }
+              );
+
+              discordBadges[index] = {
                 ...badge,
                 id,
-                description: nitroLabel,
-                icon: " _"
+                icon: nitro.profileIcon,
+                source: { uri: nitro.profileIcon },
+                label: title,
+                title,
+                name: title,
+                description,
+                subtitle: description,
+                subtext: description
               };
+
               replaced = true;
             }
 
             if (!replaced) {
               const id = `jadges-nitro-${userId}`;
-              registerImage(id, nitro.profileIcon, nitroLabel, userId, {
-                nitro
-              });
-              output.unshift({
+              registerVisual(
                 id,
-                description: nitroLabel,
-                icon: " _"
+                nitro.profileIcon,
+                title,
+                description,
+                userId,
+                { nitro }
+              );
+
+              discordBadges.unshift({
+                id,
+                icon: nitro.profileIcon,
+                source: { uri: nitro.profileIcon },
+                label: title,
+                title,
+                name: title,
+                description,
+                subtitle: description,
+                subtext: description
               });
             }
           }
@@ -200,26 +222,34 @@
             )
             .map((item, index) => {
               const id = `jadges-${userId}-${index}`;
-              const label = item.tooltip || item.name || "Jadges Badge";
+              const title = item.tooltip || item.name || "Jadges Badge";
 
-              registerImage(id, item.badge, label, userId, {
-                createdAt: item.createdAt,
-                nitro: item.nitro
-              });
+              registerVisual(
+                id,
+                item.badge,
+                title,
+                "",
+                userId,
+                { createdAt: item.createdAt }
+              );
 
               return {
                 id,
-                description: label,
-                icon: " _"
+                icon: item.badge,
+                source: { uri: item.badge },
+                label: title,
+                title,
+                name: title,
+                description: title
               };
             });
 
-          return [...output, ...customBadges];
+          return [...customBadges, ...discordBadges];
         }
       );
 
       refreshTimer = setInterval(() => void refreshBadges(), REFRESH_INTERVAL);
-      vendetta.logger.log("[JadgesBadges] Enabled with Nitro presets");
+      vendetta.logger.log("[JadgesBadges] Enabled");
     } catch (error) {
       vendetta.logger.error("[JadgesBadges] Failed to start", error);
     }
