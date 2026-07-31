@@ -36,7 +36,10 @@ export const config = {
     process.env.WEB_SESSION_SECRET?.trim() || discordClientSecret || discordToken,
   jaycordStaffBadgeUrl:
     process.env.JAYCORD_STAFF_BADGE_URL?.trim() ||
-    "https://media.discordapp.net/attachments/1532712764450013296/1532721284692180992/5e74e9b61934fc1f67c65515d1f7e60d.png?ex=6a6de16e&is=6a6c8fee&hm=80946d307868795e63e3a2432ea80a42e1ed24f994b56569fb9a4032b115a4df&=&format=webp&quality=lossless",
+    "https://cdn.discordapp.com/attachments/1532712764450013296/1532721284692180992/5e74e9b61934fc1f67c65515d1f7e60d.png",
+  jaycordAdminBadgeUrl:
+    process.env.JAYCORD_ADMIN_BADGE_URL?.trim() ||
+    "https://cdn.discordapp.com/attachments/1532351165688316065/1532783355861401692/cdn.discordapp_3.png",
   dataDir,
   imagesDir: path.join(dataDir, "badges"),
   storeFile: path.join(dataDir, "badges.json"),
