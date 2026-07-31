@@ -2,18 +2,21 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
+import sharp from "sharp";
 import { config } from "./config.js";
-import { publicNitroPreset } from "./presets.js";
+import { isNitroPreset, NITRO_PRESETS, publicNitroPreset } from "./presets.js";
 import { publicImageUrl } from "./storage.js";
 import { readStore } from "./store.js";
 import type {
   BadgeRecord,
+  NitroPreset,
   PublicBadge,
   PublicNitroPreset,
   UserRecord,
 } from "./types.js";
 
 const allowedFile = /^[0-9a-f-]+\.(?:png|jpg|webp|gif|apng)$/i;
+const nitroIconCache = new Map<NitroPreset, Buffer>();
 
 function sendJson(
   response: http.ServerResponse,
@@ -46,6 +49,10 @@ function requestOrigin(request: http.IncomingMessage): string {
   }
 
   return config.publicUrl;
+}
+
+function mobileNitroIconUrl(origin: string, preset: NitroPreset): string {
+  return `${origin.replace(/\/$/, "")}/nitro-icons/${preset}.png`;
 }
 
 function legacyNitroPreset(badges: BadgeRecord[]): PublicNitroPreset | undefined {
@@ -103,11 +110,70 @@ function publicBadgesForUser(user: UserRecord, origin: string): PublicBadge[] {
       tooltip: `Subscriber since ${nitro.subscriberSince}`,
       badge: "",
       pending: false,
-      nitro,
+      nitro: {
+        ...nitro,
+        mobileIcon: mobileNitroIconUrl(origin, nitro.key),
+      },
     });
   }
 
   return badges;
+}
+
+async function serveNitroIcon(
+  response: http.ServerResponse,
+  preset: NitroPreset,
+): Promise<void> {
+  try {
+    let png = nitroIconCache.get(preset);
+
+    if (!png) {
+      const sourceUrl = NITRO_PRESETS[preset].profileIcon;
+      const remote = await fetch(sourceUrl, {
+        headers: {
+          "accept": "image/svg+xml,image/*;q=0.8",
+          "user-agent": "Jadges/1.0",
+        },
+        signal: AbortSignal.timeout(15_000),
+      });
+
+      if (!remote.ok) {
+        throw new Error(`Nitro icon source returned HTTP ${remote.status}`);
+      }
+
+      const contentLength = Number(remote.headers.get("content-length") || 0);
+      if (contentLength > 2 * 1024 * 1024) {
+        throw new Error("Nitro icon source was unexpectedly large");
+      }
+
+      const source = Buffer.from(await remote.arrayBuffer());
+      if (source.length > 2 * 1024 * 1024) {
+        throw new Error("Nitro icon source was unexpectedly large");
+      }
+
+      png = await sharp(source, { density: 288 })
+        .resize(96, 96, {
+          fit: "contain",
+          withoutEnlargement: false,
+        })
+        .png()
+        .toBuffer();
+
+      nitroIconCache.set(preset, png);
+    }
+
+    response.writeHead(200, {
+      "content-type": "image/png",
+      "content-length": png.length,
+      "access-control-allow-origin": "*",
+      "cross-origin-resource-policy": "cross-origin",
+      "cache-control": "public, max-age=86400",
+    });
+    response.end(png);
+  } catch (error) {
+    console.error(`Could not render mobile Nitro icon ${preset}:`, error);
+    sendJson(response, 502, { error: "Could not render Nitro icon" });
+  }
 }
 
 async function serveImage(
@@ -185,6 +251,22 @@ export function startServer(): http.Server {
         const data = await readStore();
         const user = data.users[userId] ?? { blocked: false, badges: [] };
         sendJson(response, 200, publicBadgesForUser(user, origin));
+        return;
+      }
+
+      if (url.pathname.startsWith("/nitro-icons/")) {
+        const filename = decodeURIComponent(
+          url.pathname.slice("/nitro-icons/".length),
+        );
+        const match = /^([a-z]+)\.png$/.exec(filename);
+        const preset = match?.[1];
+
+        if (!isNitroPreset(preset)) {
+          sendJson(response, 404, { error: "Not found" });
+          return;
+        }
+
+        await serveNitroIcon(response, preset);
         return;
       }
 
