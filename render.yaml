@@ -19,6 +19,10 @@ services:
         value: "5242880"
       - key: DISCORD_TOKEN
         sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
+      - key: WEB_SESSION_SECRET
+        sync: false
       - key: CLIENT_ID
         sync: false
       - key: GUILD_ID
@@ -28,6 +32,8 @@ services:
       - key: VERIFIER_ROLE
         sync: false
       - key: PUBLIC_URL
+        sync: false
+      - key: JAYCORD_STAFF_BADGE_URL
         sync: false
       - key: BLACKLISTED_WORDS
         sync: false
