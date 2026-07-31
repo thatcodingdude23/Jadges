@@ -1,11 +1,13 @@
 import {
   ActionRowBuilder,
+  ActivityType,
   Attachment,
   ButtonBuilder,
   ButtonInteraction,
   ButtonStyle,
   ChatInputCommandInteraction,
   Client,
+  ContainerBuilder,
   EmbedBuilder,
   Events,
   GatewayIntentBits,
@@ -15,6 +17,7 @@ import {
   Routes,
   SlashCommandBuilder,
   TextChannel,
+  TextDisplayBuilder,
 } from "discord.js";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
@@ -106,6 +109,44 @@ function hasVerifierRole(interaction: ChatInputCommandInteraction | ButtonIntera
 
 function cleanName(value: string): string {
   return value.trim().replace(/\s+/g, " ");
+}
+
+function reviewDmContainer(
+  badge: BadgeRecord,
+  outcome: "approved" | "denied",
+): ContainerBuilder {
+  const approved = outcome === "approved";
+  const heading = approved
+    ? "## Your badge got accepted!"
+    : "## Your badge was denied";
+  const message = approved
+    ? "After review, a member of the staff team has approved your badge. It is now equipped on your profile. Refresh or restart Discord to see it. Other users with the Jadges plugin installed will also be able to see your badge."
+    : "After review, a member of the staff team has decided not to approve your badge. It has not been equipped on your profile. You may submit a new badge that follows the server's badge guidelines.";
+
+  return new ContainerBuilder()
+    .setAccentColor(approved ? 0x57f287 : 0xed4245)
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        `${heading}\n${message}\n\n**Badge:** ${badge.name}`,
+      ),
+      new TextDisplayBuilder().setContent("-# Jadges • Badge review update"),
+    );
+}
+
+async function sendReviewDm(
+  client: Client,
+  badge: BadgeRecord,
+  outcome: "approved" | "denied",
+): Promise<void> {
+  try {
+    const user = await client.users.fetch(badge.userId);
+    await user.send({
+      components: [reviewDmContainer(badge, outcome)],
+      flags: MessageFlags.IsComponentsV2,
+    });
+  } catch (error) {
+    console.warn(`Could not DM badge ${outcome} notice to ${badge.userId}:`, error);
+  }
 }
 
 async function sendVerification(
@@ -283,7 +324,7 @@ async function handleCommand(
   }
 }
 
-async function handleButton(interaction: ButtonInteraction): Promise<void> {
+async function handleButton(client: Client, interaction: ButtonInteraction): Promise<void> {
   if (!interaction.customId.startsWith("badge:")) return;
   if (!hasVerifierRole(interaction)) {
     await interaction.reply({ content: "You cannot review badges.", flags: MessageFlags.Ephemeral });
@@ -295,11 +336,12 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
 
   try {
     if (action === "approve") {
-      await approveBadge(badgeId);
+      const badge = await approveBadge(badgeId);
       const embed = EmbedBuilder.from(interaction.message.embeds[0]!)
         .setColor(0x57f287)
         .setFooter({ text: `Approved by ${interaction.user.username}` });
       await interaction.update({ embeds: [embed], components: [] });
+      await sendReviewDm(client, badge, "approved");
       return;
     }
 
@@ -310,6 +352,7 @@ async function handleButton(interaction: ButtonInteraction): Promise<void> {
         .setColor(0xed4245)
         .setFooter({ text: `Denied by ${interaction.user.username}` });
       await interaction.update({ embeds: [embed], components: [] });
+      await sendReviewDm(client, badge, "denied");
     }
   } catch (error) {
     console.error("Badge review failed:", error);
@@ -329,6 +372,16 @@ export async function startDiscordBot(): Promise<Client> {
 
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
   client.once(Events.ClientReady, (readyClient) => {
+    readyClient.user.setPresence({
+      status: "dnd",
+      activities: [
+        {
+          name: "Badges seem interesting...",
+          state: "Badges seem interesting...",
+          type: ActivityType.Custom,
+        },
+      ],
+    });
     console.log(`Discord bot connected as ${readyClient.user.tag}`);
   });
   client.on(Events.InteractionCreate, async (interaction) => {
@@ -336,7 +389,7 @@ export async function startDiscordBot(): Promise<Client> {
       if (interaction.isChatInputCommand()) {
         await handleCommand(client, interaction);
       } else if (interaction.isButton()) {
-        await handleButton(interaction);
+        await handleButton(client, interaction);
       }
     } catch (error) {
       console.error("Interaction failed:", error);
