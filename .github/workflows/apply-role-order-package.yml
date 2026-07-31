@@ -1,0 +1,97 @@
+name: Apply role limit and package Vencord
+
+on:
+  push:
+    paths:
+      - .github/workflows/apply-role-order-package.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Apply requested changes
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          import hashlib
+          import json
+
+          discord = Path("src/discord.ts")
+          text = discord.read_text(encoding="utf-8")
+
+          marker = "const botPresence = {"
+          addition = 'const UNLIMITED_BADGES_ROLE = "1531693367639937075";\n\n'
+          if addition not in text:
+              if marker not in text:
+                  raise SystemExit("Could not find botPresence marker")
+              text = text.replace(marker, addition + marker, 1)
+
+          old_limit = '''  const member = interaction.member as GuildMember;
+  const limit = config.maxBadges + (member.premiumSince ? config.extraBoostBadges : 0);
+  if (user.badges.length >= limit) {'''
+          new_limit = '''  const member = interaction.member as GuildMember;
+  const hasUnlimitedBadges = member.roles.cache.has(UNLIMITED_BADGES_ROLE);
+  const limit = config.maxBadges + (member.premiumSince ? config.extraBoostBadges : 0);
+  if (!hasUnlimitedBadges && user.badges.length >= limit) {'''
+          if old_limit in text:
+              text = text.replace(old_limit, new_limit, 1)
+          elif new_limit not in text:
+              raise SystemExit("Could not find badge limit block")
+          discord.write_text(text, encoding="utf-8")
+
+          vencord = Path("vencord-plugin/jadgesBadges/index.tsx")
+          text = vencord.read_text(encoding="utf-8")
+          text = text.replace("position: BadgePosition.END,", "position: BadgePosition.START,")
+          return_marker = "    return output;\n}"
+          sorted_return = '''    output.sort((left, right) => {
+        const leftIsNitro = left.id.startsWith("jadges_nitro_");
+        const rightIsNitro = right.id.startsWith("jadges_nitro_");
+        return Number(leftIsNitro) - Number(rightIsNitro);
+    });
+
+    return output;
+}'''
+          if sorted_return not in text:
+              if return_marker not in text:
+                  raise SystemExit("Could not find Vencord return marker")
+              text = text.replace(return_marker, sorted_return, 1)
+          vencord.write_text(text, encoding="utf-8")
+
+          revenge = Path("revenge-plugin/index.js")
+          text = revenge.read_text(encoding="utf-8")
+          old_order = "          return [...output, ...customBadges];"
+          new_order = "          return [...customBadges, ...output];"
+          if old_order in text:
+              text = text.replace(old_order, new_order, 1)
+          elif new_order not in text:
+              raise SystemExit("Could not find Revenge badge return order")
+          revenge.write_text(text, encoding="utf-8")
+
+          digest = hashlib.sha256(revenge.read_bytes()).hexdigest()
+          manifest_path = Path("revenge-plugin/manifest.json")
+          manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+          manifest["hash"] = digest
+          manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          PY
+
+      - name: Build downloadable Vencord ZIP
+        run: |
+          rm -f vencord-plugin/jadgesBadges.zip
+          cd vencord-plugin
+          zip -r jadgesBadges.zip jadgesBadges
+
+      - name: Remove temporary workflow and commit
+        run: |
+          rm .github/workflows/apply-role-order-package.yml
+          git config user.name "thatcodingdude23"
+          git config user.email "152893832+thatcodingdude23@users.noreply.github.com"
+          git add -A
+          git commit -m "add unlimited badge role and prioritize custom badges [skip ci]"
+          git push
