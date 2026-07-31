@@ -1,51 +1,100 @@
 # Jadges
 
-Jadges is a custom Discord badge system that lets users submit their own profile badges and display approved badges directly on Discord profiles.
+Jadges is a custom Discord badge system that lets users submit profile badges, choose Nitro appearances, rearrange their Jadges badges, and display approved badges directly on Discord profiles.
 
-**Visit the Official Discord Server:** https://discord.gg/jaycord
+**Official Discord server:** https://discord.gg/jaycord
 
 ## Supported clients
-
-Jadges works on both:
 
 - **Vencord** — desktop
 - **Revenge** — Android
 
-Approved badges use the native Discord profile badge row, including the badge image and hover description.
+Only users with the Jadges plugin installed can see Jadges customizations.
 
 ## Features
 
 - Custom badge images and names
-- Native Discord profile badge display
-- Separate Bronze, Silver, Gold, Platinum, Diamond, Emerald, Ruby, and Opal Nitro presets
-- Preset-specific Nitro icons and calculated subscriber dates
-- Discord-styled badge directory for Nitro presets and custom badges on Vencord
-- Works across Vencord and Revenge
+- Bronze, Silver, Gold, Platinum, Diamond, Emerald, Ruby, and Opal Nitro presets
+- Native Nitro and server-boosting badge removal mode
+- Automatic Jaycord Staff badge
+- Private Discord-authorized badge rearrangement page
+- Drag-to-swap badge ordering
+- Optional left-side or right-side badge placement
+- Administrative badge deletion with a reason DM
 - Staff approval and denial buttons
-- User badge limits
-- Extra badge slots for server boosters
-- Badge-name blacklist
-- Commands to create, delete, list, block, and unblock
-- Approved badges automatically sync between supported clients
+- Badge limits, booster slots, and badge-name filtering
+- Vencord and Revenge support
 
 ## Commands
 
 ```text
-/badge create
-/badge delete
-/badge list
-/badge block
-/badge unblock
-/nitro preset
+/badge create name:<name> image:<image>
+/badge remove badge:<your badge>
+/badge delete user:<user> badge:<badge> reason:<reason>
+/badge rearrange
+/badge list [user]
+/badge nitro set preset:<tier>
+/badge nitro remove
+/badge block user:<user>
+/badge unblock user:<user>
 ```
 
-Use `/badge create` for custom badges and `/nitro` to submit a Nitro tier separately. Both requests go through staff approval.
+`/badge delete` is staff-only. Its badge field uses autocomplete after a user is selected. The deleted user receives a DM containing the reason.
+
+`/badge rearrange` returns an ephemeral, expiring link. The page requires Discord OAuth and only accepts the same Discord account that ran the command. The Jaycord Staff badge remains pinned first.
+
+## Discord OAuth setup
+
+The rearrangement page needs Discord OAuth.
+
+1. Open the Discord Developer Portal for the Jadges application.
+2. Add this OAuth redirect URI:
+
+```text
+https://jadges.onrender.com/oauth/callback
+```
+
+Use the exact value of `PUBLIC_URL` if it differs from the URL above.
+
+3. Add these Render environment variables:
+
+```text
+DISCORD_CLIENT_SECRET=<Discord application client secret>
+WEB_SESSION_SECRET=<long random secret>
+```
+
+`WEB_SESSION_SECRET` is optional but strongly recommended. When omitted, Jadges falls back to the Discord client secret or bot token for signing private links and sessions.
+
+## Render variables
+
+Required variables:
+
+```text
+DISCORD_TOKEN
+CLIENT_ID
+GUILD_ID
+PROMPT_CHANNEL
+VERIFIER_ROLE
+PUBLIC_URL
+DISCORD_CLIENT_SECRET
+```
+
+Optional variables:
+
+```text
+WEB_SESSION_SECRET
+JAYCORD_STAFF_BADGE_URL
+BLACKLISTED_WORDS
+MAX_BADGES
+EXTRA_BOOST_BADGES
+MAX_BADGE_SIZE
+```
+
+Enable **Server Members Intent** in the Discord Developer Portal so the automatic Jaycord Staff role badge can sync.
 
 ## Vencord
 
-Install the `JadgesBadges` userplugin in your Vencord source and rebuild Vencord. The plugin loads approved badges from the Jadges API and displays them using Discord's native badge system.
-
-The current Vencord source is available in:
+Copy this folder into `Vencord/src/userplugins/` and rebuild Vencord:
 
 ```text
 vencord-plugin/jadgesBadges/
@@ -53,21 +102,12 @@ vencord-plugin/jadgesBadges/
 
 ## Revenge
 
-Open Revenge's plugin settings, choose **Add Plugin**, and paste this source URL:
+Add this plugin source URL in Revenge:
 
 ```text
 https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/
 ```
 
-Revenge automatically loads `manifest.json` and the plugin JavaScript from that folder.
+## Privacy and security
 
-## How it works
-
-1. A user submits a custom badge with `/badge create` or a Nitro tier with `/nitro`.
-2. Staff approve or deny the request.
-3. Approved badges and Nitro preset metadata are added to the public Jadges badge list.
-4. The Vencord and Revenge plugins display the result on that user's Discord profile.
-
-## Privacy
-
-Tokens, Discord IDs, private configuration, stored badge data, and local environment files are not included in this repository.
+OAuth access is limited to the `identify` scope. Rearrangement links expire, are bound to the Discord user who ran the command, and require a signed session cookie before badge data can be changed.
