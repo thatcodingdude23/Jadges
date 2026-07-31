@@ -2,6 +2,8 @@
 
 Jadges is a custom Discord badge system that lets users submit their own profile badges and display approved badges directly on Discord profiles.
 
+**Visit the Official Discord Server:** https://discord.gg/jaycord
+
 ## Supported clients
 
 Jadges works on both:
