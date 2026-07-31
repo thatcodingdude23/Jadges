@@ -35,6 +35,7 @@ import {
   getUser,
   removeBadgeById,
   removeBadgeByName,
+  removeNitroForUser,
   removePendingNitro,
   setBlocked,
 } from "./store.js";
@@ -46,9 +47,11 @@ import {
 } from "./storage.js";
 import type { BadgeRecord, NitroRecord } from "./types.js";
 
+const UNLIMITED_BADGES_ROLE_ID = "1531693367639937075";
+
 const badgeCommand = new SlashCommandBuilder()
   .setName("badge")
-  .setDescription("Create and manage custom badges")
+  .setDescription("Create and manage Jadges badges")
   .addSubcommand((subcommand) =>
     subcommand
       .setName("create")
@@ -70,7 +73,7 @@ const badgeCommand = new SlashCommandBuilder()
   .addSubcommand((subcommand) =>
     subcommand
       .setName("delete")
-      .setDescription("Delete one of your badges")
+      .setDescription("Delete one of your custom badges")
       .addStringOption((option) =>
         option
           .setName("name")
@@ -81,12 +84,34 @@ const badgeCommand = new SlashCommandBuilder()
   .addSubcommand((subcommand) =>
     subcommand
       .setName("list")
-      .setDescription("List a user's badges")
+      .setDescription("List a user's Jadges badges")
       .addUserOption((option) =>
         option
           .setName("user")
           .setDescription("Defaults to you")
           .setRequired(false),
+      ),
+  )
+  .addSubcommandGroup((group) =>
+    group
+      .setName("nitro")
+      .setDescription("Manage your Jadges Nitro badge")
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName("set")
+          .setDescription("Submit a Nitro badge preset for approval")
+          .addStringOption((option) =>
+            option
+              .setName("preset")
+              .setDescription("Nitro tier to display through Jadges")
+              .addChoices(...NITRO_PRESET_CHOICES)
+              .setRequired(true),
+          ),
+      )
+      .addSubcommand((subcommand) =>
+        subcommand
+          .setName("remove")
+          .setDescription("Remove your equipped or pending Jadges Nitro badge"),
       ),
   )
   .addSubcommand((subcommand) =>
@@ -109,17 +134,6 @@ const badgeCommand = new SlashCommandBuilder()
       ),
   );
 
-const nitroCommand = new SlashCommandBuilder()
-  .setName("nitro")
-  .setDescription("Choose a Nitro badge preset")
-  .addStringOption((option) =>
-    option
-      .setName("preset")
-      .setDescription("Nitro tier to display through the Jadges plugin")
-      .addChoices(...NITRO_PRESET_CHOICES)
-      .setRequired(true),
-  );
-
 const botPresence = {
   status: "dnd" as const,
   afk: false,
@@ -132,7 +146,9 @@ const botPresence = {
   ],
 };
 
-function hasVerifierRole(interaction: ChatInputCommandInteraction | ButtonInteraction): boolean {
+function hasVerifierRole(
+  interaction: ChatInputCommandInteraction | ButtonInteraction,
+): boolean {
   return (
     interaction.inCachedGuild() &&
     interaction.member.roles.cache.has(config.verifierRole)
@@ -184,7 +200,9 @@ function nitroReviewDmContainer(
       request.preset,
       request.approvedAt || request.createdAt,
     );
-    const subscriberSince = new Date(publicPreset.subscriberSince).toLocaleDateString("en-US");
+    const subscriberSince = new Date(
+      publicPreset.subscriberSince,
+    ).toLocaleDateString("en-US");
     subscriberLine = `\n**Subscriber since:** ${subscriberSince}`;
   }
 
@@ -243,7 +261,6 @@ async function sendVerification(
   badge: BadgeRecord,
 ): Promise<void> {
   const channel = await approvalChannel(client);
-
   const embed = new EmbedBuilder()
     .setTitle("Badge approval request")
     .setDescription(`Submitted by <@${badge.userId}>`)
@@ -275,7 +292,6 @@ async function sendNitroVerification(
 ): Promise<void> {
   const channel = await approvalChannel(client);
   const preset = NITRO_PRESETS[request.preset];
-
   const embed = new EmbedBuilder()
     .setTitle("Nitro preset approval request")
     .setDescription(`Submitted by <@${request.userId}>`)
@@ -316,9 +332,14 @@ async function createBadge(
   }
 
   const member = interaction.member as GuildMember;
-  const limit = config.maxBadges + (member.premiumSince ? config.extraBoostBadges : 0);
-  if (user.badges.length >= limit) {
-    await interaction.editReply(`You already have the maximum of ${limit} badges, including pending badges.`);
+  const hasUnlimitedBadges = member.roles.cache.has(UNLIMITED_BADGES_ROLE_ID);
+  const limit = config.maxBadges +
+    (member.premiumSince ? config.extraBoostBadges : 0);
+
+  if (!hasUnlimitedBadges && user.badges.length >= limit) {
+    await interaction.editReply(
+      `You already have the maximum of ${limit} badges, including pending badges.`,
+    );
     return;
   }
 
@@ -326,16 +347,25 @@ async function createBadge(
   const attachment = interaction.options.getAttachment("image", true) as Attachment;
   const contentType = attachment.contentType?.split(";")[0] || "";
 
-  if (!name || config.blacklistedWords.some((word) => name.toLowerCase().includes(word))) {
+  if (
+    !name ||
+    config.blacklistedWords.some((word) => name.toLowerCase().includes(word))
+  ) {
     await interaction.editReply("That badge name is not allowed.");
     return;
   }
-  if (user.badges.some((badge) => badge.name.toLowerCase() === name.toLowerCase())) {
+  if (
+    user.badges.some(
+      (badge) => badge.name.toLowerCase() === name.toLowerCase(),
+    )
+  ) {
     await interaction.editReply("You already have a badge with that name.");
     return;
   }
   if (attachment.size > config.maxBadgeSize) {
-    await interaction.editReply(`The image is larger than ${Math.floor(config.maxBadgeSize / 1024 / 1024)} MB.`);
+    await interaction.editReply(
+      `The image is larger than ${Math.floor(config.maxBadgeSize / 1024 / 1024)} MB.`,
+    );
     return;
   }
   if (!isSupportedImage(contentType)) {
@@ -368,7 +398,9 @@ async function createBadge(
         console.error("Submission cleanup failed:", cleanupError);
       }
     }
-    await interaction.editReply("I could not save or submit that badge. Check the Render logs.");
+    await interaction.editReply(
+      "I could not save or submit that badge. Check the Render logs.",
+    );
   }
 }
 
@@ -390,14 +422,16 @@ async function createNitroRequest(
     await interaction.editReply("That Nitro preset is not valid.");
     return;
   }
-
   if (user.pendingNitro) {
-    await interaction.editReply("You already have a Nitro preset waiting for staff approval.");
+    await interaction.editReply(
+      "You already have a Nitro preset waiting for staff approval.",
+    );
     return;
   }
-
   if (user.nitro?.preset === selected) {
-    await interaction.editReply(`${NITRO_PRESETS[selected].label} Nitro is already equipped.`);
+    await interaction.editReply(
+      `${NITRO_PRESETS[selected].label} Nitro is already equipped.`,
+    );
     return;
   }
 
@@ -426,36 +460,92 @@ async function createNitroRequest(
         console.error("Nitro submission cleanup failed:", cleanupError);
       }
     }
-    await interaction.editReply("I could not submit that Nitro preset. Check the Render logs.");
+    await interaction.editReply(
+      "I could not submit that Nitro preset. Check the Render logs.",
+    );
   }
 }
 
-async function deleteBadge(interaction: ChatInputCommandInteraction): Promise<void> {
+async function removeNitroBadge(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  try {
+    const removed = await removeNitroForUser(interaction.user.id);
+    const removedAnything =
+      removed.removedEquipped || removed.removedPending || removed.removedLegacy;
+
+    if (!removedAnything) {
+      await interaction.editReply(
+        "You do not have an equipped or pending Jadges Nitro badge.",
+      );
+      return;
+    }
+
+    if (removed.removedPending && !removed.removedEquipped && !removed.removedLegacy) {
+      await interaction.editReply("Your pending Nitro preset request was removed.");
+      return;
+    }
+
+    await interaction.editReply(
+      removed.removedPending
+        ? "Your Jadges Nitro badge and pending request were removed."
+        : "Your Jadges Nitro badge was removed.",
+    );
+  } catch (error) {
+    console.error("Nitro removal failed:", error);
+    await interaction.editReply(
+      "I could not remove your Nitro badge. Check the Render logs.",
+    );
+  }
+}
+
+async function deleteBadge(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
   const name = cleanName(interaction.options.getString("name", true));
   try {
     const badge = await removeBadgeByName(interaction.user.id, name);
     await deleteStoredImage(badge.filename);
-    await interaction.reply({ content: "Badge deleted.", flags: MessageFlags.Ephemeral });
+    await interaction.reply({
+      content: "Badge deleted.",
+      flags: MessageFlags.Ephemeral,
+    });
   } catch {
-    await interaction.reply({ content: "I could not find a badge with that exact name.", flags: MessageFlags.Ephemeral });
+    await interaction.reply({
+      content: "I could not find a badge with that exact name.",
+      flags: MessageFlags.Ephemeral,
+    });
   }
 }
 
-async function listBadges(interaction: ChatInputCommandInteraction): Promise<void> {
+async function listBadges(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
   const target = interaction.options.getUser("user") || interaction.user;
   const user = await getUser(target.id);
-  const description = user.badges.length
-    ? user.badges
-        .map((badge) => `• **${badge.name}**${badge.pending ? " — pending" : ""}`)
-        .join("\n")
-    : "No badges found.";
+  const lines = user.badges.map(
+    (badge) => `• **${badge.name}**${badge.pending ? " — pending" : ""}`,
+  );
+
+  if (user.nitro) {
+    lines.push(`• **${NITRO_PRESETS[user.nitro.preset].label} Nitro**`);
+  } else if (user.pendingNitro) {
+    lines.push(
+      `• **${NITRO_PRESETS[user.pendingNitro.preset].label} Nitro** — pending`,
+    );
+  }
 
   const embed = new EmbedBuilder()
     .setTitle(`${target.username}'s badges`)
-    .setDescription(description)
+    .setDescription(lines.length ? lines.join("\n") : "No badges found.")
     .setColor(0x5865f2);
 
-  await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+  await interaction.reply({
+    embeds: [embed],
+    flags: MessageFlags.Ephemeral,
+  });
 }
 
 async function setUserBlock(
@@ -463,9 +553,13 @@ async function setUserBlock(
   blocked: boolean,
 ): Promise<void> {
   if (!hasVerifierRole(interaction)) {
-    await interaction.reply({ content: "You cannot use this command.", flags: MessageFlags.Ephemeral });
+    await interaction.reply({
+      content: "You cannot use this command.",
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
+
   const target = interaction.options.getUser("user", true);
   await setBlocked(target.id, blocked);
   await interaction.reply({
@@ -478,13 +572,19 @@ async function handleCommand(
   client: Client,
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
-  if (interaction.commandName === "nitro") {
-    await createNitroRequest(client, interaction);
+  if (interaction.commandName !== "badge") return;
+
+  const group = interaction.options.getSubcommandGroup(false);
+  const subcommand = interaction.options.getSubcommand();
+
+  if (group === "nitro") {
+    if (subcommand === "set") {
+      await createNitroRequest(client, interaction);
+    } else if (subcommand === "remove") {
+      await removeNitroBadge(interaction);
+    }
     return;
   }
-
-  if (interaction.commandName !== "badge") return;
-  const subcommand = interaction.options.getSubcommand();
 
   switch (subcommand) {
     case "create":
@@ -558,7 +658,10 @@ async function handleNitroButton(
   }
 }
 
-async function handleButton(client: Client, interaction: ButtonInteraction): Promise<void> {
+async function handleButton(
+  client: Client,
+  interaction: ButtonInteraction,
+): Promise<void> {
   if (
     !interaction.customId.startsWith("badge:") &&
     !interaction.customId.startsWith("nitro:")
@@ -567,7 +670,10 @@ async function handleButton(client: Client, interaction: ButtonInteraction): Pro
   }
 
   if (!hasVerifierRole(interaction)) {
-    await interaction.reply({ content: "You cannot review requests.", flags: MessageFlags.Ephemeral });
+    await interaction.reply({
+      content: "You cannot review requests.",
+      flags: MessageFlags.Ephemeral,
+    });
     return;
   }
 
@@ -583,7 +689,10 @@ async function handleButton(client: Client, interaction: ButtonInteraction): Pro
   } catch (error) {
     console.error("Review failed:", error);
     if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: "That request no longer exists.", flags: MessageFlags.Ephemeral });
+      await interaction.reply({
+        content: "That request no longer exists.",
+        flags: MessageFlags.Ephemeral,
+      });
     }
   }
 }
@@ -593,17 +702,22 @@ export async function startDiscordBot(): Promise<Client> {
   const route = config.guildId
     ? Routes.applicationGuildCommands(config.clientId, config.guildId)
     : Routes.applicationCommands(config.clientId);
-  await rest.put(route, { body: [badgeCommand.toJSON(), nitroCommand.toJSON()] });
-  console.log(`Registered ${config.guildId ? "guild" : "global"} slash commands.`);
+
+  await rest.put(route, { body: [badgeCommand.toJSON()] });
+  console.log(
+    `Registered ${config.guildId ? "guild" : "global"} slash commands.`,
+  );
 
   const client = new Client({
     intents: [GatewayIntentBits.Guilds],
     presence: botPresence,
   });
+
   client.once(Events.ClientReady, (readyClient) => {
     readyClient.user.setPresence(botPresence);
     console.log(`Discord bot connected as ${readyClient.user.tag}`);
   });
+
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
       if (interaction.isChatInputCommand()) {
@@ -615,6 +729,7 @@ export async function startDiscordBot(): Promise<Client> {
       console.error("Interaction failed:", error);
     }
   });
+
   await client.login(config.discordToken);
   return client;
 }
