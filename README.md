@@ -17,6 +17,9 @@ Approved badges use the native Discord profile badge row, including the badge im
 
 - Custom badge images and names
 - Native Discord profile badge display
+- Optional Bronze, Silver, Gold, Platinum, Diamond, Emerald, Ruby, and Opal Nitro presets
+- Preset-specific Nitro icons and calculated subscriber dates
+- Discord-styled badge directory for Nitro presets and custom badges on Vencord
 - Works across Vencord and Revenge
 - Staff approval and denial buttons
 - User badge limits
@@ -35,9 +38,17 @@ Approved badges use the native Discord profile badge row, including the badge im
 /badge unblock
 ```
 
+The optional `preset` choice on `/badge create` applies after the badge is approved.
+
 ## Vencord
 
 Install the `JadgesBadges` userplugin in your Vencord source and rebuild Vencord. The plugin loads approved badges from the Jadges API and displays them using Discord's native badge system.
+
+The current Vencord source is available in:
+
+```text
+vencord-plugin/jadgesBadges/
+```
 
 ## Revenge
 
@@ -51,10 +62,10 @@ Revenge automatically loads `manifest.json` and the plugin JavaScript from that 
 
 ## How it works
 
-1. A user submits a badge with `/badge create`.
+1. A user submits a badge with `/badge create` and may select an optional Nitro preset.
 2. Staff approve or deny the submission.
-3. Approved badges are added to the public Jadges badge list.
-4. The Vencord and Revenge plugins display the badge on that user's Discord profile.
+3. Approved badges and preset metadata are added to the public Jadges badge list.
+4. The Vencord and Revenge plugins display the result on that user's Discord profile.
 
 ## Privacy
 
