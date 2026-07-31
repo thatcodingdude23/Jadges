@@ -63,9 +63,9 @@ export function mutateStore<T>(
 }
 
 export function getOrCreateUser(data: StoreData, userId: string): UserRecord {
-  data.users[userId] ??= { blocked: false, badges: [] };
-  data.users[userId].badges ??= [];
-  return data.users[userId];
+  const user = data.users[userId] ??= { blocked: false, badges: [] };
+  user.badges ??= [];
+  return user;
 }
 
 export async function getUser(userId: string): Promise<UserRecord> {
