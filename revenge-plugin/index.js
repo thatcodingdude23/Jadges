@@ -53,7 +53,10 @@
   function registerImage(id, image, label, userId, extra = {}) {
     badgeProps[id] = {
       id,
+      icon: image,
       source: { uri: image },
+      iconSource: { uri: image },
+      imageSource: { uri: image },
       label,
       userId,
       ...extra
@@ -84,9 +87,7 @@
     const props = badgeProps[id];
 
     if (props && element?.props) {
-      element.props.source = props.source;
-      element.props.label = props.label;
-      element.props.id = props.id;
+      Object.assign(element.props, props);
     }
 
     return element;
@@ -165,28 +166,34 @@
               return {
                 id,
                 description: label,
-                icon: " _"
+                icon: item.badge,
+                source: { uri: item.badge }
               };
             });
 
           const nitro = getNitroPreset(jadges);
           let nitroBadge;
 
-          if (
-            nitro &&
-            typeof nitro.profileIcon === "string" &&
-            nitro.profileIcon.startsWith("https://")
-          ) {
-            const id = `jadges-nitro-${userId}`;
-            const label = `Subscriber since ${formatDate(nitro.subscriberSince)}`;
+          if (nitro) {
+            const mobileIcon =
+              typeof nitro.hoverImage === "string" &&
+              nitro.hoverImage.startsWith("https://")
+                ? nitro.hoverImage
+                : nitro.profileIcon;
 
-            registerImage(id, nitro.profileIcon, label, userId, { nitro });
+            if (typeof mobileIcon === "string" && mobileIcon.startsWith("https://")) {
+              const id = `jadges-nitro-${userId}`;
+              const label = `Subscriber since ${formatDate(nitro.subscriberSince)}`;
 
-            nitroBadge = {
-              id,
-              description: label,
-              icon: " _"
-            };
+              registerImage(id, mobileIcon, label, userId, { nitro });
+
+              nitroBadge = {
+                id,
+                description: label,
+                icon: mobileIcon,
+                source: { uri: mobileIcon }
+              };
+            }
           }
 
           const discordBadges = (Array.isArray(originalBadges) ? originalBadges : [])
@@ -201,7 +208,7 @@
       );
 
       refreshTimer = setInterval(() => void refreshBadges(), REFRESH_INTERVAL);
-      vendetta.logger.log("[JadgesBadges] Enabled with Vencord-style badge rendering");
+      vendetta.logger.log("[JadgesBadges] Enabled with PNG Nitro artwork");
     } catch (error) {
       vendetta.logger.error("[JadgesBadges] Failed to start", error);
     }
