@@ -19,11 +19,14 @@ import type {
 const allowedFile = /^[0-9a-f-]+\.(?:png|jpg|webp|gif|apng)$/i;
 const nitroIconCache = new Map<NitroPreset, Buffer>();
 const JAYCORD_STAFF_ROLE_ID = "1532572957778645082";
+const JAYCORD_ADMIN_ROLE_ID = "1531693475181887580";
 const JAYCORD_STAFF_BADGE_NAME = "Jaycord Staff";
+const JAYCORD_ADMIN_BADGE_NAME = "Jaycord Admin";
 const STAFF_SYNC_INTERVAL = 60_000;
 const MAX_REMOTE_IMAGE_SIZE = 2 * 1024 * 1024;
 
 let jaycordStaffUserIds = new Set<string>();
+let jaycordAdminUserIds = new Set<string>();
 let staffSyncPromise: Promise<void> | undefined;
 let lastStaffSyncAt = 0;
 
@@ -76,6 +79,7 @@ async function refreshJaycordStaffMembers(): Promise<void> {
   }
 
   const nextStaffUserIds = new Set<string>();
+  const nextAdminUserIds = new Set<string>();
   let after: string | undefined;
 
   while (true) {
@@ -111,12 +115,13 @@ async function refreshJaycordStaffMembers(): Promise<void> {
 
     for (const member of members) {
       const userId = member.user?.id;
-      if (
-        userId &&
-        Array.isArray(member.roles) &&
-        member.roles.includes(JAYCORD_STAFF_ROLE_ID)
-      ) {
+      if (!userId || !Array.isArray(member.roles)) continue;
+
+      if (member.roles.includes(JAYCORD_STAFF_ROLE_ID)) {
         nextStaffUserIds.add(userId);
+      }
+      if (member.roles.includes(JAYCORD_ADMIN_ROLE_ID)) {
+        nextAdminUserIds.add(userId);
       }
     }
 
@@ -128,8 +133,11 @@ async function refreshJaycordStaffMembers(): Promise<void> {
   }
 
   jaycordStaffUserIds = nextStaffUserIds;
+  jaycordAdminUserIds = nextAdminUserIds;
   lastStaffSyncAt = Date.now();
-  console.log(`Synced ${jaycordStaffUserIds.size} Jaycord Staff badge holders.`);
+  console.log(
+    `Synced ${jaycordStaffUserIds.size} Jaycord Staff and ${jaycordAdminUserIds.size} Jaycord Admin role holders.`,
+  );
 }
 
 async function ensureJaycordStaffMembersFresh(): Promise<void> {
@@ -146,6 +154,21 @@ async function ensureJaycordStaffMembersFresh(): Promise<void> {
   }
 
   await staffSyncPromise;
+}
+
+
+type SystemStaffBadge = "staff" | "admin";
+
+function systemStaffBadgeForUser(
+  userId: string,
+  user: UserRecord,
+): SystemStaffBadge | undefined {
+  const hasAdminRole = jaycordAdminUserIds.has(userId);
+  const hasDefaultAccess = jaycordStaffUserIds.has(userId) || hasAdminRole;
+  if (!hasDefaultAccess) return undefined;
+
+  if (user.staffBadgeMode === "admin" && hasAdminRole) return "admin";
+  return "staff";
 }
 
 function legacyNitroPreset(badges: BadgeRecord[]): PublicNitroPreset | undefined {
@@ -212,10 +235,28 @@ function orderMovableBadges(user: UserRecord, badges: PublicBadge[]): PublicBadg
     .map(({ badge }) => badge);
 }
 
+function settingsRecord(user: UserRecord): PublicBadge {
+  return {
+    key: "settings",
+    name: "Jadges Settings",
+    tooltip: "",
+    badge: "",
+    pending: false,
+    side: user.badgeSide,
+    metadata: true,
+    order: user.badgeOrder ? [...user.badgeOrder] : [],
+    nativeBadges: (user.nativeBadges || []).map((badge) => ({
+      key: badge.key,
+      name: badge.name,
+      image: badge.image,
+    })),
+  };
+}
+
 function publicBadgesForUser(
   user: UserRecord,
   origin: string,
-  isJaycordStaff: boolean,
+  systemStaffBadge: SystemStaffBadge | undefined,
 ): PublicBadge[] {
   const side = user.badgeSide;
   const movable = user.badges
@@ -242,17 +283,22 @@ function publicBadgesForUser(
 
   const ordered = orderMovableBadges(user, movable);
 
-  if (isJaycordStaff) {
+  if (systemStaffBadge) {
+    const isAdmin = systemStaffBadge === "admin";
+    const name = isAdmin ? JAYCORD_ADMIN_BADGE_NAME : JAYCORD_STAFF_BADGE_NAME;
     ordered.unshift({
       key: "staff",
-      name: JAYCORD_STAFF_BADGE_NAME,
-      tooltip: JAYCORD_STAFF_BADGE_NAME,
-      badge: config.jaycordStaffBadgeUrl,
+      name,
+      tooltip: name,
+      badge: isAdmin ? config.jaycordAdminBadgeUrl : config.jaycordStaffBadgeUrl,
       pending: false,
       side,
     });
   }
 
+  // Always include a settings record for stored users so native Discord order can
+  // be applied even when the user has no custom Jadges badge.
+  ordered.push(settingsRecord(user));
   return ordered;
 }
 
@@ -362,12 +408,19 @@ export function startServer(): http.Server {
       const origin = requestOrigin(request);
 
       if (
+        url.pathname === "/rearrange"
+        || url.pathname === "/api/rearrange"
+      ) {
+        await ensureJaycordStaffMembersFresh();
+      }
+
+      if (
         await handleRearrangeRequest(
           request,
           response,
           url,
           origin,
-          (userId) => jaycordStaffUserIds.has(userId),
+          (userId, user) => systemStaffBadgeForUser(userId, user),
         )
       ) {
         return;
@@ -390,6 +443,7 @@ export function startServer(): http.Server {
         const userIds = new Set([
           ...Object.keys(data.users),
           ...jaycordStaffUserIds,
+          ...jaycordAdminUserIds,
         ]);
 
         for (const userId of userIds) {
@@ -397,7 +451,7 @@ export function startServer(): http.Server {
           const badges = publicBadgesForUser(
             user,
             origin,
-            jaycordStaffUserIds.has(userId),
+            systemStaffBadgeForUser(userId, user),
           );
           if (badges.length > 0) result[userId] = badges;
         }
@@ -422,7 +476,7 @@ export function startServer(): http.Server {
           publicBadgesForUser(
             user,
             origin,
-            jaycordStaffUserIds.has(userId),
+            systemStaffBadgeForUser(userId, user),
           ),
         );
         return;
@@ -431,6 +485,15 @@ export function startServer(): http.Server {
       if (url.pathname === "/system-badges/jaycord-staff.png") {
         response.writeHead(302, {
           location: config.jaycordStaffBadgeUrl,
+          "cache-control": "no-store",
+        });
+        response.end();
+        return;
+      }
+
+      if (url.pathname === "/system-badges/jaycord-admin.png") {
+        response.writeHead(302, {
+          location: config.jaycordAdminBadgeUrl,
           "cache-control": "no-store",
         });
         response.end();
