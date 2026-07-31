@@ -2,6 +2,7 @@ import {
   ActionRowBuilder,
   ActivityType,
   Attachment,
+  AutocompleteInteraction,
   ButtonBuilder,
   ButtonInteraction,
   ButtonStyle,
@@ -27,6 +28,7 @@ import {
   NITRO_PRESETS,
   publicNitroPreset,
 } from "./presets.js";
+import { createRearrangeTicket, isRearrangeConfigured } from "./rearrange.js";
 import {
   addPendingBadge,
   addPendingNitro,
@@ -35,8 +37,11 @@ import {
   getUser,
   removeBadgeById,
   removeBadgeByName,
+  removeBadgeForUserById,
+  removeEquippedNitroForUser,
   removeNitroForUser,
   removePendingNitro,
+  removePendingNitroForUser,
   setBlocked,
 } from "./store.js";
 import {
@@ -72,14 +77,45 @@ const badgeCommand = new SlashCommandBuilder()
   )
   .addSubcommand((subcommand) =>
     subcommand
-      .setName("delete")
-      .setDescription("Delete one of your custom badges")
+      .setName("remove")
+      .setDescription("Remove one of your own custom badges")
       .addStringOption((option) =>
         option
-          .setName("name")
-          .setDescription("Exact badge name")
+          .setName("badge")
+          .setDescription("Badge to remove")
+          .setAutocomplete(true)
           .setRequired(true),
       ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("delete")
+      .setDescription("Admin: delete a badge from a user")
+      .addUserOption((option) =>
+        option
+          .setName("user")
+          .setDescription("User whose badge should be deleted")
+          .setRequired(true),
+      )
+      .addStringOption((option) =>
+        option
+          .setName("badge")
+          .setDescription("Select one of the user's badges")
+          .setAutocomplete(true)
+          .setRequired(true),
+      )
+      .addStringOption((option) =>
+        option
+          .setName("reason")
+          .setDescription("Reason shown to the user")
+          .setMaxLength(500)
+          .setRequired(true),
+      ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("rearrange")
+      .setDescription("Open your private badge rearrangement page"),
   )
   .addSubcommand((subcommand) =>
     subcommand
@@ -146,9 +182,12 @@ const botPresence = {
   ],
 };
 
-function hasVerifierRole(
-  interaction: ChatInputCommandInteraction | ButtonInteraction,
-): boolean {
+type StaffInteraction =
+  | ChatInputCommandInteraction
+  | ButtonInteraction
+  | AutocompleteInteraction;
+
+function hasVerifierRole(interaction: StaffInteraction): boolean {
   return (
     interaction.inCachedGuild() &&
     interaction.member.roles.cache.has(config.verifierRole)
@@ -157,6 +196,13 @@ function hasVerifierRole(
 
 function cleanName(value: string): string {
   return value.trim().replace(/\s+/g, " ");
+}
+
+function nitroDisplayName(request: NitroRecord): string {
+  const preset = NITRO_PRESETS[request.preset];
+  return request.preset === "remove"
+    ? "Remove Nitro Badge"
+    : `${preset.label} Nitro`;
 }
 
 function reviewDmContainer(
@@ -186,16 +232,20 @@ function nitroReviewDmContainer(
   outcome: "approved" | "denied",
 ): ContainerBuilder {
   const approved = outcome === "approved";
-  const preset = NITRO_PRESETS[request.preset];
+  const removing = request.preset === "remove";
   const heading = approved
-    ? "## Your Nitro preset got accepted!"
+    ? removing
+      ? "## Native Nitro badges will now be hidden"
+      : "## Your Nitro preset got accepted!"
     : "## Your Nitro preset was denied";
   const message = approved
-    ? "After review, a member of the staff team has approved your Nitro preset. It is now equipped through Jadges. Refresh or restart Discord to see it. Other users with the Jadges plugin installed will also see the selected tier."
+    ? removing
+      ? "After review, Jadges will hide your native Nitro and server-boosting profile badges for people using the Jadges plugin."
+      : "After review, a member of the staff team has approved your Nitro preset. It is now equipped through Jadges. Refresh or restart Discord to see it. Other users with the Jadges plugin installed will also see the selected tier."
     : "After review, a member of the staff team has decided not to approve your Nitro preset. Your currently equipped Nitro appearance has not been changed.";
 
   let subscriberLine = "";
-  if (approved) {
+  if (approved && !removing) {
     const publicPreset = publicNitroPreset(
       request.preset,
       request.approvedAt || request.createdAt,
@@ -210,9 +260,23 @@ function nitroReviewDmContainer(
     .setAccentColor(approved ? 0x57f287 : 0xed4245)
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `${heading}\n${message}\n\n**Preset:** ${preset.label} Nitro${subscriberLine}`,
+        `${heading}\n${message}\n\n**Selection:** ${nitroDisplayName(request)}${subscriberLine}`,
       ),
       new TextDisplayBuilder().setContent("-# Jadges • Nitro preset review"),
+    );
+}
+
+function adminDeletionDmContainer(
+  badgeName: string,
+  reason: string,
+): ContainerBuilder {
+  return new ContainerBuilder()
+    .setAccentColor(0xed4245)
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        `## A badge was removed from your profile\nA member of the staff team removed **${badgeName}** from your Jadges profile.\n\n**Reason:** ${reason}`,
+      ),
+      new TextDisplayBuilder().setContent("-# Jadges • Administrative badge removal"),
     );
 }
 
@@ -245,6 +309,25 @@ async function sendNitroReviewDm(
     });
   } catch (error) {
     console.warn(`Could not DM Nitro ${outcome} notice to ${request.userId}:`, error);
+  }
+}
+
+async function sendAdminDeletionDm(
+  client: Client,
+  userId: string,
+  badgeName: string,
+  reason: string,
+): Promise<boolean> {
+  try {
+    const user = await client.users.fetch(userId);
+    await user.send({
+      components: [adminDeletionDmContainer(badgeName, reason)],
+      flags: MessageFlags.IsComponentsV2,
+    });
+    return true;
+  } catch (error) {
+    console.warn(`Could not DM administrative deletion notice to ${userId}:`, error);
+    return false;
   }
 }
 
@@ -296,13 +379,14 @@ async function sendNitroVerification(
     .setTitle("Nitro preset approval request")
     .setDescription(`Submitted by <@${request.userId}>`)
     .addFields(
-      { name: "Preset", value: `${preset.label} Nitro` },
+      { name: "Selection", value: nitroDisplayName(request) },
       { name: "Request ID", value: request.id },
     )
     .setThumbnail(preset.profileIcon)
-    .setImage(preset.hoverImage)
     .setColor(0xf0b232)
     .setTimestamp(new Date(request.createdAt));
+
+  if (request.preset !== "remove") embed.setImage(preset.hoverImage);
 
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
@@ -430,7 +514,9 @@ async function createNitroRequest(
   }
   if (user.nitro?.preset === selected) {
     await interaction.editReply(
-      `${NITRO_PRESETS[selected].label} Nitro is already equipped.`,
+      selected === "remove"
+        ? "Native Nitro badge removal is already enabled."
+        : `${NITRO_PRESETS[selected].label} Nitro is already equipped.`,
     );
     return;
   }
@@ -449,7 +535,7 @@ async function createNitroRequest(
     saved = true;
     await sendNitroVerification(client, request);
     await interaction.editReply(
-      `${NITRO_PRESETS[selected].label} Nitro was sent for staff approval.`,
+      `${nitroDisplayName(request)} was sent for staff approval.`,
     );
   } catch (error) {
     console.error("Nitro preset submission failed:", error);
@@ -491,7 +577,7 @@ async function removeNitroBadge(
     await interaction.editReply(
       removed.removedPending
         ? "Your Jadges Nitro badge and pending request were removed."
-        : "Your Jadges Nitro badge was removed.",
+        : "Your Jadges Nitro badge was removed. Native Discord badges will be restored for Jadges users.",
     );
   } catch (error) {
     console.error("Nitro removal failed:", error);
@@ -501,23 +587,115 @@ async function removeNitroBadge(
   }
 }
 
-async function deleteBadge(
+async function removeOwnBadge(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
-  const name = cleanName(interaction.options.getString("name", true));
+  const value = interaction.options.getString("badge", true);
+  const badgeId = value.startsWith("custom:") ? value.slice("custom:".length) : undefined;
+
   try {
-    const badge = await removeBadgeByName(interaction.user.id, name);
+    const badge = badgeId
+      ? await removeBadgeForUserById(interaction.user.id, badgeId)
+      : await removeBadgeByName(interaction.user.id, cleanName(value));
     await deleteStoredImage(badge.filename);
     await interaction.reply({
-      content: "Badge deleted.",
+      content: `**${badge.name}** was removed from your profile.`,
       flags: MessageFlags.Ephemeral,
     });
   } catch {
     await interaction.reply({
-      content: "I could not find a badge with that exact name.",
+      content: "I could not find that badge on your profile.",
       flags: MessageFlags.Ephemeral,
     });
   }
+}
+
+async function adminDeleteBadge(
+  client: Client,
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  if (!hasVerifierRole(interaction)) {
+    await interaction.editReply("You cannot use this command.");
+    return;
+  }
+
+  const target = interaction.options.getUser("user", true);
+  const selected = interaction.options.getString("badge", true);
+  const reason = cleanName(interaction.options.getString("reason", true));
+
+  try {
+    let badgeName: string;
+
+    if (selected.startsWith("custom:")) {
+      const badge = await removeBadgeForUserById(
+        target.id,
+        selected.slice("custom:".length),
+      );
+      badgeName = badge.name;
+      await deleteStoredImage(badge.filename).catch((error) => {
+        console.warn(`Could not remove stored image for ${badge.id}:`, error);
+      });
+    } else if (selected === "nitro:equipped") {
+      const request = await removeEquippedNitroForUser(target.id);
+      badgeName = nitroDisplayName(request);
+    } else if (selected === "nitro:pending") {
+      const request = await removePendingNitroForUser(target.id);
+      badgeName = `${nitroDisplayName(request)} (pending)`;
+    } else {
+      throw new Error("Badge selection is invalid");
+    }
+
+    const dmSent = await sendAdminDeletionDm(
+      client,
+      target.id,
+      badgeName,
+      reason,
+    );
+
+    await interaction.editReply(
+      `Deleted **${badgeName}** from ${target.username}'s Jadges profile.${
+        dmSent ? " The user was notified by DM." : " I could not DM the user."
+      }`,
+    );
+  } catch (error) {
+    console.error("Administrative badge deletion failed:", error);
+    await interaction.editReply(
+      "That badge could not be found or has already been removed.",
+    );
+  }
+}
+
+async function openRearrangePage(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  if (!isRearrangeConfigured()) {
+    await interaction.reply({
+      content:
+        "The rearrangement website is not configured yet. Add `DISCORD_CLIENT_SECRET` on Render and set the Discord OAuth redirect URI to `" +
+        `${config.publicUrl}/oauth/callback` +
+        "`.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return;
+  }
+
+  const ticket = createRearrangeTicket(interaction.user.id);
+  const url = `${config.publicUrl}/rearrange?ticket=${encodeURIComponent(ticket)}`;
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setLabel("Open badge rearranger")
+      .setStyle(ButtonStyle.Link)
+      .setURL(url),
+  );
+
+  await interaction.reply({
+    content:
+      "Open your private badge rearrangement page below. You must authorize the same Discord account that ran this command. The link expires in 30 minutes.",
+    components: [row],
+    flags: MessageFlags.Ephemeral,
+  });
 }
 
 async function listBadges(
@@ -530,11 +708,13 @@ async function listBadges(
   );
 
   if (user.nitro) {
-    lines.push(`• **${NITRO_PRESETS[user.nitro.preset].label} Nitro**`);
+    lines.push(`• **${nitroDisplayName(user.nitro)}**`);
   } else if (user.pendingNitro) {
-    lines.push(
-      `• **${NITRO_PRESETS[user.pendingNitro.preset].label} Nitro** — pending`,
-    );
+    lines.push(`• **${nitroDisplayName(user.pendingNitro)}** — pending`);
+  }
+
+  if (user.badgeSide) {
+    lines.push(`\n**Placement:** ${user.badgeSide === "left" ? "Left side" : "Right side"}`);
   }
 
   const embed = new EmbedBuilder()
@@ -568,6 +748,72 @@ async function setUserBlock(
   });
 }
 
+function truncateChoice(value: string): string {
+  return value.length <= 100 ? value : `${value.slice(0, 97)}...`;
+}
+
+async function handleAutocomplete(
+  interaction: AutocompleteInteraction,
+): Promise<void> {
+  if (interaction.commandName !== "badge") return;
+
+  const subcommand = interaction.options.getSubcommand(false);
+  const focused = interaction.options.getFocused(true);
+  if (focused.name !== "badge") {
+    await interaction.respond([]);
+    return;
+  }
+
+  const query = String(focused.value || "").toLowerCase();
+
+  if (subcommand === "remove") {
+    const user = await getUser(interaction.user.id);
+    const choices = user.badges
+      .filter((badge) => badge.name.toLowerCase().includes(query))
+      .slice(0, 25)
+      .map((badge) => ({
+        name: truncateChoice(`${badge.name}${badge.pending ? " (pending)" : ""}`),
+        value: `custom:${badge.id}`,
+      }));
+    await interaction.respond(choices);
+    return;
+  }
+
+  if (subcommand !== "delete" || !hasVerifierRole(interaction)) {
+    await interaction.respond([]);
+    return;
+  }
+
+  const targetValue = interaction.options.get("user")?.value;
+  const targetId = typeof targetValue === "string" ? targetValue : undefined;
+  if (!targetId) {
+    await interaction.respond([]);
+    return;
+  }
+
+  const user = await getUser(targetId);
+  const choices: Array<{ name: string; value: string }> = user.badges.map((badge) => ({
+    name: truncateChoice(`${badge.name}${badge.pending ? " (pending)" : ""}`),
+    value: `custom:${badge.id}`,
+  }));
+
+  if (user.nitro) {
+    choices.push({ name: truncateChoice(nitroDisplayName(user.nitro)), value: "nitro:equipped" });
+  }
+  if (user.pendingNitro) {
+    choices.push({
+      name: truncateChoice(`${nitroDisplayName(user.pendingNitro)} (pending)`),
+      value: "nitro:pending",
+    });
+  }
+
+  await interaction.respond(
+    choices
+      .filter((choice) => choice.name.toLowerCase().includes(query))
+      .slice(0, 25),
+  );
+}
+
 async function handleCommand(
   client: Client,
   interaction: ChatInputCommandInteraction,
@@ -590,8 +836,14 @@ async function handleCommand(
     case "create":
       await createBadge(client, interaction);
       break;
+    case "remove":
+      await removeOwnBadge(interaction);
+      break;
     case "delete":
-      await deleteBadge(interaction);
+      await adminDeleteBadge(client, interaction);
+      break;
+    case "rearrange":
+      await openRearrangePage(interaction);
       break;
     case "list":
       await listBadges(interaction);
@@ -720,13 +972,18 @@ export async function startDiscordBot(): Promise<Client> {
 
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
-      if (interaction.isChatInputCommand()) {
+      if (interaction.isAutocomplete()) {
+        await handleAutocomplete(interaction);
+      } else if (interaction.isChatInputCommand()) {
         await handleCommand(client, interaction);
       } else if (interaction.isButton()) {
         await handleButton(client, interaction);
       }
     } catch (error) {
       console.error("Interaction failed:", error);
+      if (interaction.isAutocomplete()) {
+        await interaction.respond([]).catch(() => undefined);
+      }
     }
   });
 
