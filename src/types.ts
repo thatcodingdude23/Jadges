@@ -9,6 +9,8 @@ export type NitroPreset =
   | "opal"
   | "remove";
 
+export type BadgeSide = "left" | "right";
+
 export interface BadgeRecord {
   id: string;
   userId: string;
@@ -36,6 +38,9 @@ export interface UserRecord {
   badges: BadgeRecord[];
   nitro?: NitroRecord;
   pendingNitro?: NitroRecord;
+  /** Ordered keys such as custom:<badge id> and nitro. Jaycord Staff stays pinned first. */
+  badgeOrder?: string[];
+  badgeSide?: BadgeSide;
 }
 
 export interface StoreData {
@@ -56,10 +61,12 @@ export interface PublicNitroPreset {
 }
 
 export interface PublicBadge {
+  key: string;
   name: string;
   tooltip: string;
   badge: string;
   pending: false;
   createdAt?: string;
+  side?: BadgeSide;
   nitro?: PublicNitroPreset;
 }
