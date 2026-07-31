@@ -10,6 +10,7 @@ export type NitroPreset =
   | "remove";
 
 export type BadgeSide = "left" | "right";
+export type StaffBadgeMode = "default" | "admin";
 
 export interface NativeBadgeObservation {
   /** Stable client-generated key beginning with discord:. */
@@ -54,6 +55,8 @@ export interface UserRecord {
   badgeSide?: BadgeSide;
   /** Native Discord badges last observed by an updated Jadges client. */
   nativeBadges?: NativeBadgeObservation[];
+  /** Optional system staff badge selection. Missing means the default staff badge. */
+  staffBadgeMode?: StaffBadgeMode;
 }
 
 export interface StoreData {
