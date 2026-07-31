@@ -1,15 +1,27 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { config } from "./config.js";
+import { setObservedNativeBadges } from "./nativeStore.js";
 import { NITRO_PRESETS } from "./presets.js";
 import { publicImageUrl } from "./storage.js";
-import { getUser, setBadgeOrder, setBadgeSide } from "./store.js";
-import type { BadgeSide, UserRecord } from "./types.js";
+import {
+  getUser,
+  readStore,
+  setBadgeOrder,
+  setBadgeSide,
+} from "./store.js";
+import type {
+  BadgeSide,
+  NativeBadgeObservation,
+  UserRecord,
+} from "./types.js";
 
 const TICKET_LIFETIME_MS = 30 * 60 * 1000;
 const SESSION_LIFETIME_MS = 60 * 60 * 1000;
 const MAX_BODY_SIZE = 64 * 1024;
 const SESSION_COOKIE = "jadges_session";
+const NATIVE_REPORT_COOLDOWN_MS = 1_500;
+const nativeReportTimes = new Map<string, number>();
 
 interface TicketPayload {
   kind: "ticket";
@@ -45,6 +57,13 @@ interface RearrangePageData {
   badges: RearrangeBadge[];
   order: string[];
   side?: BadgeSide;
+  hasNativeBadges: boolean;
+}
+
+interface PublicBadgeSettings {
+  side?: BadgeSide;
+  order: string[];
+  nativeBadges: Array<{ key: string; name: string; image: string; }>;
 }
 
 function encode(value: string): string {
@@ -127,13 +146,34 @@ function sendHtml(response: ServerResponse, status: number, html: string): void 
   response.end(html);
 }
 
-function sendJson(response: ServerResponse, status: number, body: unknown): void {
+function sendJson(
+  response: ServerResponse,
+  status: number,
+  body: unknown,
+  cors = false,
+): void {
   response.writeHead(status, {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store",
-    "access-control-allow-origin": config.publicUrl,
+    "access-control-allow-origin": cors ? "*" : config.publicUrl,
+    ...(cors
+      ? {
+          "access-control-allow-methods": "POST, OPTIONS",
+          "access-control-allow-headers": "content-type",
+        }
+      : {}),
   });
   response.end(JSON.stringify(body));
+}
+
+function sendEmptyCors(response: ServerResponse): void {
+  response.writeHead(204, {
+    "access-control-allow-origin": "*",
+    "access-control-allow-methods": "POST, OPTIONS",
+    "access-control-allow-headers": "content-type",
+    "access-control-max-age": "86400",
+  });
+  response.end();
 }
 
 function redirect(response: ServerResponse, location: string): void {
@@ -164,20 +204,20 @@ function pageShell(title: string, content: string): string {
     :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; background: #0f1015; color: #f5f6f7; }
-    .page { width: min(920px, calc(100% - 32px)); margin: 0 auto; padding: 56px 0; }
+    .page { width: min(980px, calc(100% - 32px)); margin: 0 auto; padding: 56px 0; }
     .panel { background: #17181f; border: 1px solid #2a2c36; border-radius: 22px; padding: 28px; box-shadow: 0 24px 80px #0008; }
     h1 { margin: 0; font-size: clamp(28px, 5vw, 42px); }
     .sub { color: #b5b8c4; margin-top: 10px; line-height: 1.55; }
     .button { display: inline-flex; align-items: center; justify-content: center; min-height: 46px; padding: 0 18px; margin-top: 22px; border: 0; border-radius: 12px; background: #5865f2; color: white; font: inherit; font-weight: 700; text-decoration: none; cursor: pointer; }
     .error { color: #ffb4ab; }
-    ${content.includes("badge-grid") ? `
     .controls { display: grid; gap: 8px; margin: 26px 0; }
     label { font-weight: 700; }
     select { width: min(360px, 100%); padding: 12px 14px; border: 1px solid #343743; border-radius: 11px; background: #20222b; color: white; font: inherit; }
     .hint { color: #8f93a3; font-size: 13px; }
+    .notice { margin: 16px 0; padding: 13px 15px; border: 1px solid #3b3e4b; border-radius: 12px; background: #20222b; color: #c5c8d2; line-height: 1.45; }
     .status { min-height: 22px; color: #9ee6b3; font-size: 14px; margin-bottom: 8px; }
     .badge-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px; }
-    .badge-card { position: relative; min-height: 150px; padding: 18px; border: 1px solid #313440; border-radius: 16px; background: #20222a; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; user-select: none; }
+    .badge-card { position: relative; min-height: 150px; padding: 18px; border: 1px solid #313440; border-radius: 16px; background: #20222a; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center; user-select: none; transition: transform 120ms ease, outline-color 120ms ease; }
     .badge-card[data-movable="true"] { cursor: grab; }
     .badge-card[data-movable="true"]:active { cursor: grabbing; }
     .badge-card.dragging { opacity: .4; }
@@ -186,7 +226,6 @@ function pageShell(title: string, content: string): string {
     .badge-name { font-weight: 800; }
     .badge-subtitle { color: #989cab; font-size: 12px; }
     .pin { position: absolute; top: 10px; right: 10px; padding: 4px 7px; border-radius: 999px; background: #2c2f3a; color: #c6c8d1; font-size: 10px; font-weight: 800; text-transform: uppercase; }
-    ` : ""}
   </style>
 </head>
 <body><main class="page"><section class="panel">${content}</section></main></body>
@@ -217,15 +256,20 @@ function renderRearrangePage(ticket: string, data: RearrangePageData): string {
   return pageShell(
     "Rearrange Jadges",
     `<h1>Rearrange your badges</h1>
-     <p class="sub">Drag one badge onto another to swap their positions. Changes are saved immediately. The Jaycord Staff badge is pinned first.</p>
+     <p class="sub">Drag one badge onto another to swap their positions. Changes are saved immediately and only affect people using the Jadges plugin. The Jaycord Staff badge stays pinned first.</p>
+     ${
+       data.hasNativeBadges
+         ? `<div class="notice">Native Discord badges detected by Jadges are included below and can be moved between your custom and Nitro badges.</div>`
+         : `<div class="notice">No native Discord badges have been detected yet. Open your Discord profile once with the updated Jadges plugin enabled, wait a few seconds, then refresh this page.</div>`
+     }
      <div class="controls">
        <label for="badge-side">Where should the badges appear?</label>
        <select id="badge-side">
          <option value="">Keep the current placement</option>
-         <option value="left">Show badges on the left</option>
-         <option value="right">Show badges on the right</option>
+         <option value="left">Show Jadges badges on the left by default</option>
+         <option value="right">Show Jadges badges on the right by default</option>
        </select>
-       <div class="hint">This choice is optional.</div>
+       <div class="hint">This optional choice is used as the fallback for newly detected badges.</div>
      </div>
      <div id="status" class="status" aria-live="polite"></div>
      <div id="badge-grid" class="badge-grid"></div>
@@ -331,7 +375,7 @@ function renderRearrangePage(ticket: string, data: RearrangePageData): string {
          if (state.badges.length === 0) {
            const empty = document.createElement("p");
            empty.className = "sub";
-           empty.textContent = "You do not have any approved Jadges badges to rearrange yet.";
+           empty.textContent = "You do not have any badges available to rearrange yet.";
            grid.append(empty);
          }
        }
@@ -351,6 +395,17 @@ function renderRearrangePage(ticket: string, data: RearrangePageData): string {
   );
 }
 
+function nativeBadgeIsVisible(user: UserRecord, key: string): boolean {
+  if (key === "discord:nitro" && user.nitro) return false;
+  if (
+    key === "discord:boosting" &&
+    user.nitro?.preset === "remove"
+  ) {
+    return false;
+  }
+  return true;
+}
+
 function orderedMovableKeys(user: UserRecord): string[] {
   const available = [
     ...user.badges
@@ -359,7 +414,11 @@ function orderedMovableKeys(user: UserRecord): string[] {
     ...(user.nitro && !user.nitro.pending && user.nitro.preset !== "remove"
       ? ["nitro"]
       : []),
+    ...(user.nativeBadges || [])
+      .filter((badge) => nativeBadgeIsVisible(user, badge.key))
+      .map((badge) => badge.key),
   ];
+
   const availableSet = new Set(available);
   const ordered = (user.badgeOrder || []).filter((key) => availableSet.has(key));
   for (const key of available) {
@@ -392,7 +451,7 @@ async function buildPageData(
       name: badge.name,
       image: publicImageUrl(badge.filename, origin),
       movable: true,
-      subtitle: "Custom badge",
+      subtitle: "Custom Jadges badge",
     });
   }
 
@@ -403,7 +462,18 @@ async function buildPageData(
       name: `${preset.label} Nitro`,
       image: preset.profileIcon,
       movable: true,
-      subtitle: "Nitro preset",
+      subtitle: "Jadges Nitro badge",
+    });
+  }
+
+  for (const badge of user.nativeBadges || []) {
+    if (!nativeBadgeIsVisible(user, badge.key)) continue;
+    badges.push({
+      key: badge.key,
+      name: badge.name,
+      image: badge.image,
+      movable: true,
+      subtitle: "Native Discord badge",
     });
   }
 
@@ -411,6 +481,7 @@ async function buildPageData(
     badges,
     order: orderedMovableKeys(user),
     side: user.badgeSide,
+    hasNativeBadges: badges.some((badge) => badge.key.startsWith("discord:")),
   };
 }
 
@@ -436,6 +507,76 @@ function authenticate(
   return sessionUserId(request) === ticket.userId ? ticket : undefined;
 }
 
+function cleanNativeBadge(value: unknown): Omit<NativeBadgeObservation, "updatedAt"> | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const badge = value as { key?: unknown; name?: unknown; image?: unknown };
+
+  const key = typeof badge.key === "string" ? badge.key.trim().toLowerCase() : "";
+  const name = typeof badge.name === "string" ? badge.name.trim().slice(0, 100) : "";
+  const image = typeof badge.image === "string" ? badge.image.trim().slice(0, 600) : "";
+
+  if (!/^discord:[a-z0-9][a-z0-9._:-]{0,95}$/.test(key)) return undefined;
+  if (!name) return undefined;
+
+  try {
+    const url = new URL(image);
+    if (url.protocol !== "https:") return undefined;
+  } catch {
+    return undefined;
+  }
+
+  return { key, name, image };
+}
+
+async function handleNativeBadgeReport(
+  request: IncomingMessage,
+  response: ServerResponse,
+): Promise<void> {
+  if (request.method === "OPTIONS") {
+    sendEmptyCors(response);
+    return;
+  }
+  if (request.method !== "POST") {
+    sendJson(response, 405, { error: "Method not allowed" }, true);
+    return;
+  }
+
+  try {
+    const body = await readJson(request) as { userId?: unknown; badges?: unknown };
+    const userId = typeof body.userId === "string" ? body.userId.trim() : "";
+    if (!/^\d{15,22}$/.test(userId)) {
+      throw new Error("Invalid Discord user ID");
+    }
+
+    const now = Date.now();
+    const last = nativeReportTimes.get(userId) || 0;
+    if (now - last < NATIVE_REPORT_COOLDOWN_MS) {
+      sendJson(response, 202, { ok: true, throttled: true }, true);
+      return;
+    }
+    nativeReportTimes.set(userId, now);
+
+    if (!Array.isArray(body.badges) || body.badges.length > 25) {
+      throw new Error("Invalid native badge list");
+    }
+
+    const updatedAt = new Date().toISOString();
+    const unique = new Map<string, NativeBadgeObservation>();
+    for (const value of body.badges) {
+      const badge = cleanNativeBadge(value);
+      if (!badge || unique.has(badge.key)) continue;
+      unique.set(badge.key, { ...badge, updatedAt });
+    }
+
+    await setObservedNativeBadges(userId, [...unique.values()]);
+    sendJson(response, 200, { ok: true, count: unique.size }, true);
+  } catch (error) {
+    sendJson(response, 400, {
+      error: error instanceof Error ? error.message : "Invalid request",
+    }, true);
+  }
+}
+
 export function isRearrangeConfigured(): boolean {
   return Boolean(config.discordClientSecret && config.publicUrl.startsWith("https://"));
 }
@@ -456,6 +597,44 @@ export async function handleRearrangeRequest(
   origin: string,
   isJaycordStaff: (userId: string) => boolean,
 ): Promise<boolean> {
+  if (url.pathname === "/settings.json") {
+    if (request.method !== "GET") {
+      sendJson(response, 405, { error: "Method not allowed" }, true);
+      return true;
+    }
+
+    const data = await readStore();
+    const result: Record<string, PublicBadgeSettings> = {};
+
+    for (const [userId, user] of Object.entries(data.users)) {
+      if (
+        !user.badgeSide &&
+        !user.badgeOrder?.length &&
+        !user.nativeBadges?.length
+      ) {
+        continue;
+      }
+
+      result[userId] = {
+        side: user.badgeSide,
+        order: user.badgeOrder ? [...user.badgeOrder] : [],
+        nativeBadges: (user.nativeBadges || []).map((badge) => ({
+          key: badge.key,
+          name: badge.name,
+          image: badge.image,
+        })),
+      };
+    }
+
+    sendJson(response, 200, result, true);
+    return true;
+  }
+
+  if (url.pathname === "/api/native-badges") {
+    await handleNativeBadgeReport(request, response);
+    return true;
+  }
+
   if (url.pathname === "/rearrange") {
     const ticketToken = url.searchParams.get("ticket");
     const ticket = verifyPayload<TicketPayload>(ticketToken, "ticket");
