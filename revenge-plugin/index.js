@@ -26,19 +26,29 @@
 
   function getSettings(userId, jadges) {
     const stored = settingsData[userId];
+    const metadata = Array.isArray(jadges)
+      ? jadges.find(item => item?.metadata === true)
+      : undefined;
+    const order = Array.isArray(stored?.order)
+      ? stored.order
+      : Array.isArray(metadata?.order)
+        ? metadata.order
+        : [];
+    const nativeBadges = Array.isArray(stored?.nativeBadges)
+      ? stored.nativeBadges
+      : Array.isArray(metadata?.nativeBadges)
+        ? metadata.nativeBadges
+        : [];
 
     return {
       side:
         stored?.side === "right" ||
-        (!stored?.side && jadges?.some(item => item?.side === "right"))
+        (!stored?.side && metadata?.side === "right") ||
+        (!stored?.side && !metadata?.side && jadges?.some(item => item?.side === "right"))
           ? "right"
           : "left",
-      order: Array.isArray(stored?.order)
-        ? stored.order.filter(value => typeof value === "string")
-        : [],
-      nativeBadges: Array.isArray(stored?.nativeBadges)
-        ? stored.nativeBadges
-        : []
+      order: order.filter(value => typeof value === "string"),
+      nativeBadges
     };
   }
 
@@ -100,6 +110,7 @@
 
   function nativeBadgeKey(badge) {
     const values = stringValues(badge);
+    const text = values.join(" ").toLowerCase();
 
     if (isServerBoostBadge(badge)) return "discord:boosting";
     if (isNitroBadge(badge)) return "discord:nitro";
@@ -367,7 +378,7 @@
       );
 
       refreshTimer = setInterval(() => void refreshBadges(), REFRESH_INTERVAL);
-      vendetta.logger.log("[JadgesBadges] Enabled with native Discord badge ordering");
+      vendetta.logger.log("[JadgesBadges] Enabled with mobile native and Jadges badge rearranging");
     } catch (error) {
       vendetta.logger.error("[JadgesBadges] Failed to start", error);
     }
