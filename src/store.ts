@@ -73,6 +73,7 @@ export async function approveBadge(badgeId: string): Promise<BadgeRecord> {
       const badge = user.badges.find((item) => item.id === badgeId);
       if (badge) {
         badge.pending = false;
+        badge.approvedAt = new Date().toISOString();
         return badge;
       }
     }
