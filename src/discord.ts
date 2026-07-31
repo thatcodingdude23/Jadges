@@ -43,6 +43,7 @@ import {
   removePendingNitro,
   removePendingNitroForUser,
   setBlocked,
+  setStaffBadgeMode,
 } from "./store.js";
 import {
   deleteStoredImage,
@@ -53,6 +54,8 @@ import {
 import type { BadgeRecord, NitroRecord } from "./types.js";
 
 const UNLIMITED_BADGES_ROLE_ID = "1531693367639937075";
+const JAYCORD_STAFF_ROLE_ID = "1532572957778645082";
+const JAYCORD_ADMIN_ROLE_ID = "1531693475181887580";
 
 const badgeCommand = new SlashCommandBuilder()
   .setName("badge")
@@ -116,6 +119,21 @@ const badgeCommand = new SlashCommandBuilder()
     subcommand
       .setName("rearrange")
       .setDescription("Open your private badge rearrangement page"),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("staff")
+      .setDescription("Choose your pinned Jaycord staff badge")
+      .addStringOption((option) =>
+        option
+          .setName("badge")
+          .setDescription("Staff badge to equip")
+          .addChoices(
+            { name: "Jaycord Admin", value: "admin" },
+            { name: "Default", value: "default" },
+          )
+          .setRequired(true),
+      ),
   )
   .addSubcommand((subcommand) =>
     subcommand
@@ -194,6 +212,16 @@ function hasVerifierRole(interaction: StaffInteraction): boolean {
   );
 }
 
+function hasRole(
+  interaction: ChatInputCommandInteraction,
+  roleId: string,
+): boolean {
+  return (
+    interaction.inCachedGuild() &&
+    interaction.member.roles.cache.has(roleId)
+  );
+}
+
 function cleanName(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }
@@ -203,6 +231,31 @@ function nitroDisplayName(request: NitroRecord): string {
   return request.preset === "remove"
     ? "Remove Nitro Badge"
     : `${preset.label} Nitro`;
+}
+
+function noticeContainer(
+  title: string,
+  description: string,
+  accentColor: number,
+): ContainerBuilder {
+  return new ContainerBuilder()
+    .setAccentColor(accentColor)
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`## ${title}\n${description}`),
+      new TextDisplayBuilder().setContent("-# Jadges • Staff badge selection"),
+    );
+}
+
+async function replyWithNotice(
+  interaction: ChatInputCommandInteraction,
+  title: string,
+  description: string,
+  accentColor: number,
+): Promise<void> {
+  await interaction.reply({
+    components: [noticeContainer(title, description, accentColor)],
+    flags: MessageFlags.Ephemeral | MessageFlags.IsComponentsV2,
+  });
 }
 
 function reviewDmContainer(
@@ -587,6 +640,84 @@ async function removeNitroBadge(
   }
 }
 
+async function setStaffBadge(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  const selection = interaction.options.getString("badge", true);
+  const hasAdminRole = hasRole(interaction, JAYCORD_ADMIN_ROLE_ID);
+  const hasStaffRole = hasRole(interaction, JAYCORD_STAFF_ROLE_ID);
+  const user = await getUser(interaction.user.id);
+
+  if (selection === "admin") {
+    if (!hasAdminRole) {
+      await replyWithNotice(
+        interaction,
+        "No permission",
+        "You are not allowed to use this command with the selected option. Please choose another option and try again.",
+        0xed4245,
+      );
+      return;
+    }
+
+    if (user.staffBadgeMode === "admin") {
+      await replyWithNotice(
+        interaction,
+        "No changes made",
+        "The selected badge is already equipped on your profile, so no changes were made.",
+        0xfee75c,
+      );
+      return;
+    }
+
+    await setStaffBadgeMode(interaction.user.id, "admin");
+    await replyWithNotice(
+      interaction,
+      "Badge updated",
+      "Jaycord Admin is now equipped as your pinned staff badge. It replaces Jaycord Staff for Jadges users.",
+      0x57f287,
+    );
+    return;
+  }
+
+  if (selection !== "default") {
+    await replyWithNotice(
+      interaction,
+      "Invalid option",
+      "That staff badge option is not available. Please choose one of the listed options.",
+      0xed4245,
+    );
+    return;
+  }
+
+  if (!hasStaffRole && !hasAdminRole) {
+    await replyWithNotice(
+      interaction,
+      "No permission",
+      "You are not allowed to use this command with the selected option. Please choose another option and try again.",
+      0xed4245,
+    );
+    return;
+  }
+
+  if (user.staffBadgeMode !== "admin") {
+    await replyWithNotice(
+      interaction,
+      "No changes made",
+      "Jaycord Staff is already equipped on your profile, so no changes were made.",
+      0xfee75c,
+    );
+    return;
+  }
+
+  await setStaffBadgeMode(interaction.user.id, "default");
+  await replyWithNotice(
+    interaction,
+    "Badge updated",
+    "Jaycord Staff has been restored as your pinned staff badge.",
+    0x57f287,
+  );
+}
+
 async function removeOwnBadge(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
@@ -711,6 +842,10 @@ async function listBadges(
     lines.push(`• **${nitroDisplayName(user.nitro)}**`);
   } else if (user.pendingNitro) {
     lines.push(`• **${nitroDisplayName(user.pendingNitro)}** — pending`);
+  }
+
+  if (user.staffBadgeMode === "admin") {
+    lines.push("• **Jaycord Admin** — pinned staff badge selection");
   }
 
   if (user.badgeSide) {
@@ -844,6 +979,9 @@ async function handleCommand(
       break;
     case "rearrange":
       await openRearrangePage(interaction);
+      break;
+    case "staff":
+      await setStaffBadge(interaction);
       break;
     case "list":
       await listBadges(interaction);
