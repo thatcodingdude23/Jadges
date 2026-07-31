@@ -275,6 +275,24 @@ function updateNativeNitroVisibility(): void {
         });
 }
 
+function handleProfileBadgeClick(event: MouseEvent): void {
+    const target = event.target;
+    const userId = lastRenderedUserId;
+
+    if (!(target instanceof Element) || !userId || buildDirectoryEntries(userId).length === 0) return;
+    if (target.closest(".jadges-directory-content")) return;
+
+    const control = target.closest("a, button");
+    const isJadgesBadge = Boolean(target.closest(".jadges-profile-badge-image"));
+    const isNativeBadge = Boolean(control?.querySelector('img[class*="badge"]'));
+
+    if (!isJadgesBadge && !isNativeBadge) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    openBadgeDirectory(userId);
+}
+
 function startProfileObserver(): void {
     profileObserver?.disconnect();
     profileObserver = new MutationObserver(() => updateNativeNitroVisibility());
@@ -351,6 +369,7 @@ function getBadges({ userId }: BadgeUserArgs): ProfileBadge[] {
             props: {
                 alt: " ",
                 "aria-hidden": true,
+                className: "jadges-profile-badge-image",
                 style: {
                     width: "20px",
                     height: "20px",
@@ -382,6 +401,7 @@ function getBadges({ userId }: BadgeUserArgs): ProfileBadge[] {
                 props: {
                     alt: " ",
                     "aria-hidden": true,
+                    className: "jadges-profile-badge-image",
                     style: {
                         width: "20px",
                         height: "20px",
@@ -419,6 +439,7 @@ export default definePlugin({
 
         addProfileBadge(profileBadge);
         startProfileObserver();
+        document.addEventListener("click", handleProfileBadgeClick, true);
         await refreshBadges();
 
         clearInterval(refreshTimer);
@@ -431,6 +452,7 @@ export default definePlugin({
         refreshTimer = undefined;
         profileObserver?.disconnect();
         profileObserver = undefined;
+        document.removeEventListener("click", handleProfileBadgeClick, true);
         restoreNativeNitroBadges();
         badgeData = {};
         lastRenderedUserId = undefined;
