@@ -1,6 +1,11 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { config } from "./config.js";
-import type { BadgeRecord, StoreData, UserRecord } from "./types.js";
+import type {
+  BadgeRecord,
+  NitroRecord,
+  StoreData,
+  UserRecord,
+} from "./types.js";
 
 const emptyStore = (): StoreData => ({ users: {} });
 let writeQueue: Promise<void> = Promise.resolve();
@@ -19,6 +24,12 @@ async function readStoreUnsafe(): Promise<StoreData> {
   const raw = await readFile(config.storeFile, "utf8");
   const parsed = JSON.parse(raw) as StoreData;
   parsed.users ??= {};
+
+  for (const user of Object.values(parsed.users)) {
+    user.blocked ??= false;
+    user.badges ??= [];
+  }
+
   return parsed;
 }
 
@@ -53,6 +64,7 @@ export function mutateStore<T>(
 
 export function getOrCreateUser(data: StoreData, userId: string): UserRecord {
   data.users[userId] ??= { blocked: false, badges: [] };
+  data.users[userId].badges ??= [];
   return data.users[userId];
 }
 
@@ -108,6 +120,48 @@ export async function removeBadgeByName(
     const [badge] = user.badges.splice(index, 1);
     if (!badge) throw new Error("Badge not found");
     return badge;
+  });
+}
+
+export async function addPendingNitro(request: NitroRecord): Promise<void> {
+  await mutateStore((data) => {
+    const user = getOrCreateUser(data, request.userId);
+    if (user.pendingNitro) {
+      throw new Error("Nitro preset already pending");
+    }
+    user.pendingNitro = request;
+  });
+}
+
+export async function approveNitro(requestId: string): Promise<NitroRecord> {
+  return mutateStore((data) => {
+    for (const user of Object.values(data.users)) {
+      const request = user.pendingNitro;
+      if (request?.id !== requestId) continue;
+
+      const approved: NitroRecord = {
+        ...request,
+        pending: false,
+        approvedAt: new Date().toISOString(),
+      };
+      user.nitro = approved;
+      delete user.pendingNitro;
+      return approved;
+    }
+    throw new Error("Nitro request not found");
+  });
+}
+
+export async function removePendingNitro(requestId: string): Promise<NitroRecord> {
+  return mutateStore((data) => {
+    for (const user of Object.values(data.users)) {
+      const request = user.pendingNitro;
+      if (request?.id !== requestId) continue;
+
+      delete user.pendingNitro;
+      return request;
+    }
+    throw new Error("Nitro request not found");
   });
 }
 
