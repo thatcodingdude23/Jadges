@@ -26,10 +26,10 @@
     return jadges.find(item => item?.nitro)?.nitro;
   }
 
-  function isNitroBadge(badge) {
-    if (!badge || typeof badge !== "object") return false;
+  function badgeText(badge) {
+    if (!badge || typeof badge !== "object") return "";
 
-    const text = [
+    return [
       badge.id,
       badge.key,
       badge.name,
@@ -37,16 +37,31 @@
       badge.description,
       badge.label,
       badge.link,
-      badge.href
+      badge.href,
+      badge.icon,
+      badge.iconSrc
     ]
       .filter(value => typeof value === "string")
       .join(" ")
       .toLowerCase();
+  }
 
+  function isNitroBadge(badge) {
+    const text = badgeText(badge);
     return (
       text.includes("subscriber") ||
       text.includes("settings/premium") ||
       text.includes("nitro")
+    );
+  }
+
+  function isServerBoostBadge(badge) {
+    const text = badgeText(badge);
+    return (
+      text.includes("server boosting") ||
+      text.includes("guild-boosting") ||
+      text.includes("premium guild subscriber") ||
+      text.includes("51040c70d4f20a921ad6674ff86fc95c")
     );
   }
 
@@ -172,9 +187,11 @@
             });
 
           const nitro = getNitroPreset(jadges);
+          const hideNativeBadges =
+            nitro?.hideNativeBadges === true || nitro?.key === "remove";
           let nitroBadge;
 
-          if (nitro) {
+          if (nitro && !hideNativeBadges) {
             const mobileIcon =
               typeof nitro.mobileIcon === "string" &&
               nitro.mobileIcon.startsWith("https://")
@@ -203,7 +220,13 @@
           }
 
           const discordBadges = (Array.isArray(originalBadges) ? originalBadges : [])
-            .filter(badge => !nitroBadge || !isNitroBadge(badge));
+            .filter(badge => {
+              if (hideNativeBadges) {
+                return !isNitroBadge(badge) && !isServerBoostBadge(badge);
+              }
+
+              return !nitroBadge || !isNitroBadge(badge);
+            });
 
           return [
             ...customBadges,
@@ -214,7 +237,9 @@
       );
 
       refreshTimer = setInterval(() => void refreshBadges(), REFRESH_INTERVAL);
-      vendetta.logger.log("[JadgesBadges] Enabled with mobile-safe Nitro profile icons");
+      vendetta.logger.log(
+        "[JadgesBadges] Enabled with Nitro replacement and native badge removal"
+      );
     } catch (error) {
       vendetta.logger.error("[JadgesBadges] Failed to start", error);
     }
