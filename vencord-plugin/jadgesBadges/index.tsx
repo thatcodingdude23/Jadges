@@ -1,6 +1,7 @@
 /*
  * Jadges profile badges for Vencord
- * Adds approved custom badges, optional Nitro presets, native badge removal, and a badge directory popup.
+ * Adds approved custom badges, Nitro presets, badge ordering/placement,
+ * native badge removal, and a badge directory popup.
  */
 
 import "./style.css";
@@ -28,6 +29,8 @@ type NitroKey =
     | "opal"
     | "remove";
 
+type BadgeSide = "left" | "right";
+
 interface NitroPreset {
     key: NitroKey;
     label: string;
@@ -40,10 +43,12 @@ interface NitroPreset {
 }
 
 interface JadgesBadge {
+    key?: string;
     name?: string;
     tooltip?: string;
     badge: string;
     createdAt?: string;
+    side?: BadgeSide;
     nitro?: NitroPreset;
 }
 
@@ -76,7 +81,7 @@ interface DirectoryEntry {
 }
 
 const DEFAULT_API_URL = "https://jadges.onrender.com/badges.json";
-const REFRESH_INTERVAL = 60_000;
+const REFRESH_INTERVAL = 5_000;
 
 let badgeData: JadgesResponse = {};
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -90,10 +95,8 @@ function normalizeApiUrl(value: unknown): string {
 
 function formatDate(value: string | undefined, twoDigitYear = false): string {
     if (!value) return "Unknown";
-
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "Unknown";
-
     return new Intl.DateTimeFormat("en-US", {
         month: "2-digit",
         day: "2-digit",
@@ -107,6 +110,11 @@ function getUserNitro(userId: string): NitroPreset | undefined {
     return badges.find(badge => badge?.nitro)?.nitro;
 }
 
+function getBadgeSide(userId: string): BadgeSide {
+    const badges = badgeData[userId];
+    return badges?.find(badge => badge?.side === "right") ? "right" : "left";
+}
+
 function removesNativeBadges(nitro: NitroPreset | undefined): boolean {
     return nitro?.hideNativeBadges === true || nitro?.key === "remove";
 }
@@ -116,35 +124,34 @@ function buildDirectoryEntries(userId: string): DirectoryEntry[] {
     if (!Array.isArray(badges)) return [];
 
     const entries: DirectoryEntry[] = [];
-
-    badges
-        .filter(badge => badge && typeof badge.badge === "string" && badge.badge.startsWith("https://"))
-        .forEach((badge, index) => {
-            const title = badge.tooltip || badge.name || "Jadges Badge";
+    badges.forEach((badge, index) => {
+        if (badge.nitro) {
+            if (removesNativeBadges(badge.nitro)) return;
             entries.push({
-                id: `jadges_custom_${userId}_${index}`,
-                title,
-                icon: badge.badge,
-                detailImage: badge.badge,
-                subtitle: badge.createdAt
-                    ? `Unlocked on ${formatDate(badge.createdAt, true)}`
-                    : "Approved through Jadges",
-                description: `A custom profile badge approved through Jadges. Other people using the plugin can also see “${title}”.`
+                id: `jadges_nitro_${userId}_${index}`,
+                title: `Nitro ${badge.nitro.label}`,
+                icon: badge.nitro.profileIcon,
+                detailImage: badge.nitro.hoverImage || badge.nitro.profileIcon,
+                subtitle: `Unlocked on ${formatDate(badge.nitro.subscriberSince, true)}`,
+                description: "Stay subscribed to Nitro to level up this badge.",
+                nitro: badge.nitro
             });
-        });
+            return;
+        }
 
-    const nitro = getUserNitro(userId);
-    if (nitro && !removesNativeBadges(nitro)) {
+        if (typeof badge.badge !== "string" || !badge.badge.startsWith("https://")) return;
+        const title = badge.tooltip || badge.name || "Jadges Badge";
         entries.push({
-            id: `jadges_nitro_${userId}`,
-            title: `Nitro ${nitro.label}`,
-            icon: nitro.profileIcon,
-            detailImage: nitro.hoverImage || nitro.profileIcon,
-            subtitle: `Unlocked on ${formatDate(nitro.subscriberSince, true)}`,
-            description: "Stay subscribed to Nitro to level up this badge.",
-            nitro
+            id: `jadges_custom_${userId}_${index}`,
+            title,
+            icon: badge.badge,
+            detailImage: badge.badge,
+            subtitle: badge.createdAt
+                ? `Unlocked on ${formatDate(badge.createdAt, true)}`
+                : "Approved through Jadges",
+            description: `A profile badge approved through Jadges. Other people using the plugin can also see “${title}”.`
         });
-    }
+    });
 
     return entries;
 }
@@ -160,21 +167,15 @@ function BadgeDirectoryModal({ userId, modalProps }: { userId: string; modalProp
                 <div>
                     <h1 className="jadges-directory-heading">Your badges</h1>
                     <div className="jadges-directory-subheading">
-                        Browse your badges and discover the custom badges equipped through Jadges.
+                        Browse the badges equipped through Jadges.
                     </div>
                 </div>
-                <button
-                    className="jadges-directory-close"
-                    aria-label="Close"
-                    onClick={modalProps.onClose}
-                >
-                    ×
-                </button>
+                <button className="jadges-directory-close" aria-label="Close" onClick={modalProps.onClose}>×</button>
             </ModalHeader>
 
             <ModalContent className="jadges-directory-content">
                 {entries.length === 0 || !selected ? (
-                    <div className="jadges-directory-empty">No Jadges badges were found for this user.</div>
+                    <div className="jadges-directory-empty">No visible Jadges badges were found for this user.</div>
                 ) : (
                     <div className="jadges-directory-layout">
                         <section className="jadges-directory-list">
@@ -195,55 +196,27 @@ function BadgeDirectoryModal({ userId, modalProps }: { userId: string; modalProp
                         </section>
 
                         <section className="jadges-directory-detail" role="tabpanel">
-                            <img
-                                className="jadges-directory-graphic"
-                                src={selected.detailImage}
-                                alt=""
-                                aria-hidden="true"
-                                onError={event => {
-                                    if (event.currentTarget.src !== selected.icon) {
-                                        event.currentTarget.src = selected.icon;
-                                    }
-                                }}
-                            />
-
+                            <img className="jadges-directory-graphic" src={selected.detailImage} alt="" aria-hidden="true" />
                             <div className="jadges-directory-identity">
                                 <h2>{selected.title}</h2>
                                 <div>{selected.subtitle}</div>
                             </div>
-
                             <div className="jadges-directory-card-row">
                                 <div className="jadges-directory-stat-card">
                                     <strong>{selected.nitro ? "Rare" : "Custom"}</strong>
                                     <span>{selected.nitro ? "Rarity" : "Badge type"}</span>
                                 </div>
-
-                                <div className="jadges-directory-description-card">
-                                    <div>{selected.description}</div>
-                                    {selected.nitro && (
-                                        <button
-                                            onClick={() => VencordNative.native.openExternal("https://discord.com/settings/premium")}
-                                        >
-                                            Nitro Home
-                                        </button>
-                                    )}
-                                </div>
+                                <div className="jadges-directory-description-card"><div>{selected.description}</div></div>
                             </div>
 
                             {selected.nitro && (
                                 <div className="jadges-directory-timeline-wrap">
-                                    <div className="jadges-directory-tier-note">
-                                        Unlock more tiers the longer you have Nitro
-                                    </div>
+                                    <div className="jadges-directory-tier-note">Unlock more tiers the longer you have Nitro</div>
                                     <div className="jadges-directory-timeline" role="list">
                                         {NITRO_TIMELINE.map(tier => {
                                             const unlocked = tier.months <= selected.nitro!.months;
                                             return (
-                                                <div
-                                                    key={tier.key}
-                                                    role="listitem"
-                                                    className={`jadges-directory-tier${unlocked ? "" : " jadges-directory-tier-locked"}`}
-                                                >
+                                                <div key={tier.key} role="listitem" className={`jadges-directory-tier${unlocked ? "" : " jadges-directory-tier-locked"}`}>
                                                     <img src={tier.icon} alt="" aria-hidden="true" />
                                                     <strong>{tier.label}</strong>
                                                     <span>{tier.months >= 12
@@ -268,14 +241,9 @@ function openBadgeDirectory(userId: string): void {
     openModal(modalProps => <BadgeDirectoryModal userId={userId} modalProps={modalProps} />);
 }
 
-function setNativeBadgeHidden(
-    selector: string,
-    shouldHide: boolean,
-    kind: "nitro" | "boosting"
-): void {
+function setNativeBadgeHidden(selector: string, shouldHide: boolean, kind: "nitro" | "boosting"): void {
     document.querySelectorAll<HTMLAnchorElement>(selector).forEach(anchor => {
         if (!anchor.querySelector('img[class*="badge"]')) return;
-
         if (shouldHide) {
             if (!anchor.dataset.jadgesOriginalDisplay) {
                 anchor.dataset.jadgesOriginalDisplay = anchor.style.display || "__empty__";
@@ -284,7 +252,6 @@ function setNativeBadgeHidden(
             anchor.dataset.jadgesHiddenKind = kind;
             return;
         }
-
         if (anchor.dataset.jadgesHiddenKind === kind) {
             const original = anchor.dataset.jadgesOriginalDisplay;
             anchor.style.display = original === "__empty__" ? "" : original || "";
@@ -295,16 +262,8 @@ function setNativeBadgeHidden(
 }
 
 function updateNativeNitroVisibility(): void {
-    const nitro = lastRenderedUserId
-        ? getUserNitro(lastRenderedUserId)
-        : undefined;
-
-    setNativeBadgeHidden(
-        'a[href*="/settings/premium"]',
-        Boolean(nitro),
-        "nitro"
-    );
-
+    const nitro = lastRenderedUserId ? getUserNitro(lastRenderedUserId) : undefined;
+    setNativeBadgeHidden('a[href*="/settings/premium"]', Boolean(nitro), "nitro");
     setNativeBadgeHidden(
         'a[href*="/settings/guild-boosting"], a[aria-label^="Server boosting since"]',
         removesNativeBadges(nitro),
@@ -315,16 +274,12 @@ function updateNativeNitroVisibility(): void {
 function handleProfileBadgeClick(event: MouseEvent): void {
     const target = event.target;
     const userId = lastRenderedUserId;
-
     if (!(target instanceof Element) || !userId || buildDirectoryEntries(userId).length === 0) return;
     if (target.closest(".jadges-directory-content")) return;
-
     const control = target.closest("a, button");
     const isJadgesBadge = Boolean(target.closest(".jadges-profile-badge-image"));
     const isNativeBadge = Boolean(control?.querySelector('img[class*="badge"]'));
-
     if (!isJadgesBadge && !isNativeBadge) return;
-
     event.preventDefault();
     event.stopImmediatePropagation();
     openBadgeDirectory(userId);
@@ -333,52 +288,32 @@ function handleProfileBadgeClick(event: MouseEvent): void {
 function startProfileObserver(): void {
     profileObserver?.disconnect();
     profileObserver = new MutationObserver(() => updateNativeNitroVisibility());
-    profileObserver.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
+    profileObserver.observe(document.body, { childList: true, subtree: true });
     updateNativeNitroVisibility();
 }
 
 function restoreNativeNitroBadges(): void {
-    document
-        .querySelectorAll<HTMLAnchorElement>('a[data-jadges-hidden-kind]')
-        .forEach(anchor => {
-            const original = anchor.dataset.jadgesOriginalDisplay;
-            anchor.style.display = original === "__empty__" ? "" : original || "";
-            delete anchor.dataset.jadgesHiddenKind;
-            delete anchor.dataset.jadgesOriginalDisplay;
-        });
+    document.querySelectorAll<HTMLAnchorElement>('a[data-jadges-hidden-kind]').forEach(anchor => {
+        const original = anchor.dataset.jadgesOriginalDisplay;
+        anchor.style.display = original === "__empty__" ? "" : original || "";
+        delete anchor.dataset.jadgesHiddenKind;
+        delete anchor.dataset.jadgesOriginalDisplay;
+    });
 }
 
 async function refreshBadges(): Promise<void> {
     const apiUrl = normalizeApiUrl(Settings.plugins.JadgesBadges?.apiUrl);
-
     try {
-        const response = await fetch(apiUrl, {
-            cache: "no-store",
-            credentials: "omit"
-        });
-
-        if (!response.ok) {
-            throw new Error(`Jadges API returned HTTP ${response.status}`);
-        }
-
+        const response = await fetch(apiUrl, { cache: "no-store", credentials: "omit" });
+        if (!response.ok) throw new Error(`Jadges API returned HTTP ${response.status}`);
         const data: unknown = await response.json();
-
         if (!data || typeof data !== "object" || Array.isArray(data)) {
             throw new TypeError("Jadges API returned an invalid response");
         }
-
         badgeData = data as JadgesResponse;
-
-        const count = Object.values(badgeData)
-            .reduce((total, badges) => total + (Array.isArray(badges) ? badges.length : 0), 0);
-
-        console.info(`[JadgesBadges presets] Loaded ${count} badge record(s).`);
         updateNativeNitroVisibility();
     } catch (error) {
-        console.error("[JadgesBadges presets] Failed to refresh badges:", error);
+        console.error("[JadgesBadges] Failed to refresh badges:", error);
     }
 }
 
@@ -386,7 +321,8 @@ function makeImageBadge(
     id: string,
     description: string,
     image: string,
-    userId: string
+    userId: string,
+    position: BadgePosition
 ): NativeDiscordBadge {
     return {
         id,
@@ -395,17 +331,13 @@ function makeImageBadge(
         image,
         rawImage: true,
         iconSrc: image,
-        position: BadgePosition.START,
+        position,
         onClick: () => openBadgeDirectory(userId),
         props: {
             alt: " ",
             "aria-hidden": true,
             className: "jadges-profile-badge-image",
-            style: {
-                width: "20px",
-                height: "20px",
-                objectFit: "contain"
-            }
+            style: { width: "20px", height: "20px", objectFit: "contain" }
         }
     };
 }
@@ -417,42 +349,33 @@ function getBadges({ userId }: BadgeUserArgs): ProfileBadge[] {
     const badges = badgeData[userId];
     if (!Array.isArray(badges)) return [];
 
+    const position = getBadgeSide(userId) === "right" ? BadgePosition.END : BadgePosition.START;
     const output: NativeDiscordBadge[] = [];
 
-    badges
-        .filter(badge =>
-            badge
-            && typeof badge.badge === "string"
-            && badge.badge.startsWith("https://")
-        )
-        .forEach((badge, index) => {
-            const description = badge.tooltip || badge.name || "Jadges Badge";
-            output.push(
-                makeImageBadge(
-                    `jadges_${userId}_${index}`,
-                    description,
-                    badge.badge,
-                    userId
-                )
-            );
-        });
+    badges.forEach((badge, index) => {
+        if (badge.nitro) {
+            if (removesNativeBadges(badge.nitro)) return;
+            const image = badge.nitro.profileIcon;
+            if (!image?.startsWith("https://")) return;
+            output.push(makeImageBadge(
+                `jadges_nitro_${userId}_${index}`,
+                `Subscriber since ${formatDate(badge.nitro.subscriberSince, true)}`,
+                image,
+                userId,
+                position
+            ));
+            return;
+        }
 
-    const nitro = getUserNitro(userId);
-    if (
-        nitro
-        && !removesNativeBadges(nitro)
-        && typeof nitro.profileIcon === "string"
-        && nitro.profileIcon.startsWith("https://")
-    ) {
-        output.push(
-            makeImageBadge(
-                `jadges_nitro_${userId}`,
-                `Subscriber since ${formatDate(nitro.subscriberSince, true)}`,
-                nitro.profileIcon,
-                userId
-            )
-        );
-    }
+        if (typeof badge.badge !== "string" || !badge.badge.startsWith("https://")) return;
+        output.push(makeImageBadge(
+            `jadges_${userId}_${index}`,
+            badge.tooltip || badge.name || "Jadges Badge",
+            badge.badge,
+            userId,
+            position
+        ));
+    });
 
     return output;
 }
@@ -464,10 +387,9 @@ const profileBadge: ProfileBadge = {
 
 export default definePlugin({
     name: "JadgesBadges",
-    description: "Displays approved Jadges badges, Nitro presets, native badge removal, and a badge directory popup.",
+    description: "Displays approved Jadges badges, custom ordering, Nitro presets, and native badge removal.",
     authors: [{ name: "Jaycord", id: 0n }],
     dependencies: ["BadgeAPI"],
-
     options: {
         apiUrl: {
             type: OptionType.STRING,
@@ -476,19 +398,14 @@ export default definePlugin({
             restartNeeded: true
         }
     },
-
     async start() {
-        console.info("[JadgesBadges presets] Starting badge and Nitro removal build.");
-
         addProfileBadge(profileBadge);
         startProfileObserver();
         document.addEventListener("click", handleProfileBadgeClick, true);
         await refreshBadges();
-
         clearInterval(refreshTimer);
         refreshTimer = setInterval(() => void refreshBadges(), REFRESH_INTERVAL);
     },
-
     stop() {
         removeProfileBadge(profileBadge);
         clearInterval(refreshTimer);
