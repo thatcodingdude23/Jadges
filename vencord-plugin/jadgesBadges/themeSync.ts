@@ -83,7 +83,7 @@ function isJadgesThemeLink(value: string): boolean {
 
 function setThemeLink(link: string | undefined): void {
     const existing = Array.isArray(Settings.themeLinks)
-        ? Settings.themeLinks.filter(value => typeof value === "string" && !isJadgesThemeLink(value))
+        ? Settings.themeLinks.filter((value: string) => typeof value === "string" && !isJadgesThemeLink(value))
         : [];
     const next = link ? [...existing, link] : existing;
 
