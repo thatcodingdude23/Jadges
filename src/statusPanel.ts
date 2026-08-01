@@ -240,7 +240,8 @@ async function publishStatus(
   startedAt: number,
   forceOffline: boolean,
 ): Promise<void> {
-  if (!client.user) return;
+  const botUser = client.user;
+  if (!botUser) return;
 
   const appVersionPromise = applicationVersion();
   const pluginsPromise = checkPlugins(forceOffline);
@@ -302,7 +303,7 @@ async function publishStatus(
         : `${OFFLINE_EMOJI} One or more Jadges systems are currently unavailable.`,
     )
     .setColor(allOnline ? 0x57f287 : 0xed4245)
-    .setThumbnail(client.user.displayAvatarURL({ size: 128 }))
+    .setThumbnail(botUser.displayAvatarURL({ size: 128 }))
     .addFields(
       {
         name: "Core Services",
@@ -386,7 +387,7 @@ async function publishStatus(
   if (!message) {
     const recent = await channel.messages.fetch({ limit: 50 }).catch(() => undefined);
     message = recent?.find((candidate) =>
-      candidate.author.id === client.user?.id &&
+      candidate.author.id === botUser.id &&
       candidate.embeds.some((existingEmbed) =>
         existingEmbed.footer?.text === FOOTER_TEXT
       )
