@@ -1,4 +1,5 @@
 .badge-card {
+  position: relative;
   cursor: pointer;
 }
 
