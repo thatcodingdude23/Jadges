@@ -255,3 +255,116 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
+
+.jadges-update-toast {
+    animation: jadges-update-enter 180ms ease-out;
+    background: var(--background-base-low, #1e1f22);
+    border: 1px solid var(--border-subtle, #3f4147);
+    border-radius: 14px;
+    bottom: 16px;
+    box-shadow: 0 16px 48px rgb(0 0 0 / 45%);
+    color: var(--text-default, #dbdee1);
+    padding: 16px;
+    position: fixed;
+    right: 16px;
+    top: auto;
+    width: min(360px, calc(100vw - 32px));
+    z-index: 2147483647;
+}
+
+.jadges-update-header {
+    align-items: flex-start;
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+}
+
+.jadges-update-title,
+.jadges-update-version {
+    display: block;
+}
+
+.jadges-update-title {
+    color: var(--text-strong, #f2f3f5);
+    font-size: 16px;
+    line-height: 1.25;
+}
+
+.jadges-update-version {
+    color: var(--text-subtle, #b5bac1);
+    font-size: 12px;
+    margin-top: 3px;
+}
+
+.jadges-update-close {
+    background: transparent;
+    border: 0;
+    color: var(--interactive-normal, #b5bac1);
+    cursor: pointer;
+    font-size: 24px;
+    line-height: 1;
+    padding: 0 2px;
+}
+
+.jadges-update-close:hover {
+    color: var(--interactive-hover, #f2f3f5);
+}
+
+.jadges-update-copy,
+.jadges-update-status {
+    line-height: 1.45;
+    margin: 12px 0 0;
+}
+
+.jadges-update-copy {
+    font-size: 14px;
+}
+
+.jadges-update-status {
+    color: var(--text-subtle, #b5bac1);
+    font-size: 12px;
+}
+
+.jadges-update-status-error {
+    color: var(--text-danger, #fa777c);
+}
+
+.jadges-update-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 14px;
+}
+
+.jadges-update-install {
+    background: var(--button-positive-background, #248046);
+    border: 0;
+    border-radius: 8px;
+    color: var(--white-500, #fff);
+    cursor: pointer;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    min-height: 36px;
+    padding: 0 14px;
+}
+
+.jadges-update-install:hover:not(:disabled) {
+    background: var(--button-positive-background-hover, #1a6334);
+}
+
+.jadges-update-install:disabled {
+    cursor: wait;
+    opacity: 0.7;
+}
+
+@keyframes jadges-update-enter {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
