@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import http, {
   type IncomingMessage,
   type RequestListener,
@@ -12,6 +12,7 @@ const SESSION_COOKIE = "jadges_session";
 const STAFF_ROLE_ID = "1532572957778645082";
 const ADMIN_ROLE_ID = "1531693475181887580";
 const ROLE_CACHE_MS = 60_000;
+const WEBSITE_STATE_MS = 10 * 60 * 1000;
 
 type StaffAccess = "staff" | "admin" | "none";
 type SignedIdentityPayload = SessionPayload | TicketPayload;
@@ -25,6 +26,12 @@ interface SessionPayload {
 interface TicketPayload {
   kind: "ticket";
   userId: string;
+  expiresAt: number;
+  nonce: string;
+}
+
+interface WebsiteStatePayload {
+  kind: "website-state";
   expiresAt: number;
   nonce: string;
 }
@@ -60,6 +67,11 @@ function signature(value: string): string {
   return createHmac("sha256", config.webSessionSecret)
     .update(value)
     .digest("base64url");
+}
+
+function signWebsiteState(payload: WebsiteStatePayload): string {
+  const body = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  return `${body}.${signature(body)}`;
 }
 
 function verifyIdentityPayload<T extends SignedIdentityPayload>(
@@ -183,10 +195,38 @@ function redirect(response: ServerResponse, location: string): void {
   response.end();
 }
 
+function startWebsiteLogin(request: IncomingMessage, response: ServerResponse): boolean {
+  if (request.method !== "GET") return false;
+  if (sessionUserId(request)) {
+    redirect(response, "/dashboard");
+    return true;
+  }
+  if (!config.discordClientSecret) return false;
+
+  const state = signWebsiteState({
+    kind: "website-state",
+    expiresAt: Date.now() + WEBSITE_STATE_MS,
+    nonce: randomBytes(12).toString("hex"),
+  });
+  const authorize = new URL("https://discord.com/oauth2/authorize");
+  authorize.searchParams.set("client_id", config.clientId);
+  authorize.searchParams.set("response_type", "code");
+  authorize.searchParams.set("redirect_uri", `${config.publicUrl}/oauth/callback`);
+  authorize.searchParams.set("scope", "identify");
+  authorize.searchParams.set("state", state);
+  authorize.searchParams.set("prompt", "consent");
+  redirect(response, authorize.toString());
+  return true;
+}
+
 function wrap(listener: RequestListener): RequestListener {
   return (request: IncomingMessage, response: ServerResponse) => {
     const run = async (): Promise<void> => {
       const url = new URL(request.url || "/", config.publicUrl);
+
+      if (url.pathname === "/login" && startWebsiteLogin(request, response)) {
+        return;
+      }
 
       if (
         url.pathname === "/rearrange" &&
