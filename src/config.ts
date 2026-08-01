@@ -14,24 +14,6 @@ function positiveNumber(name: string, fallback: number): number {
   return value;
 }
 
-function stableBadgeUrl(name: string, fallback: string): string {
-  const value = process.env[name]?.trim();
-  if (!value) return fallback;
-
-  try {
-    const url = new URL(value);
-    const isExpiringDiscordAttachment =
-      (url.hostname === "cdn.discordapp.com" || url.hostname === "media.discordapp.net")
-      && url.pathname.includes("/attachments/");
-
-    return url.protocol === "https:" && !isExpiringDiscordAttachment
-      ? url.toString()
-      : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 const port = positiveNumber("PORT", 10000);
 const dataDir = path.resolve(process.env.DATA_DIR?.trim() || "./data");
 const publicUrl = (
@@ -41,8 +23,6 @@ const publicUrl = (
 ).replace(/\/$/, "");
 const discordToken = required("DISCORD_TOKEN");
 const discordClientSecret = process.env.DISCORD_CLIENT_SECRET?.trim() || undefined;
-const badgeAssetRoot =
-  "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/assets";
 
 export const config = {
   discordToken,
@@ -54,14 +34,10 @@ export const config = {
   publicUrl,
   webSessionSecret:
     process.env.WEB_SESSION_SECRET?.trim() || discordClientSecret || discordToken,
-  jaycordStaffBadgeUrl: stableBadgeUrl(
-    "JAYCORD_STAFF_BADGE_URL",
-    `${badgeAssetRoot}/jaycord-staff.svg`,
-  ),
-  jaycordAdminBadgeUrl: stableBadgeUrl(
-    "JAYCORD_ADMIN_BADGE_URL",
-    `${badgeAssetRoot}/jaycord-admin.svg`,
-  ),
+  jaycordStaffBadgeUrl:
+    "https://jadges.onrender.com/badges/f395fbf2-d778-49eb-ab15-489a6ce16995.webp",
+  jaycordAdminBadgeUrl:
+    "https://cdn.discordapp.com/attachments/1532351165688316065/1532783355861401692/cdn.discordapp_3.png",
   dataDir,
   imagesDir: path.join(dataDir, "badges"),
   storeFile: path.join(dataDir, "badges.json"),
