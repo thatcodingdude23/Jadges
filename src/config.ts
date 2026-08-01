@@ -37,7 +37,7 @@ export const config = {
   jaycordStaffBadgeUrl:
     "https://jadges.onrender.com/badges/f395fbf2-d778-49eb-ab15-489a6ce16995.webp",
   jaycordAdminBadgeUrl:
-    "https://cdn.discordapp.com/attachments/1532351165688316065/1532783355861401692/cdn.discordapp_3.png",
+    "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/assets/jaycord-admin.webp",
   dataDir,
   imagesDir: path.join(dataDir, "badges"),
   storeFile: path.join(dataDir, "badges.json"),
