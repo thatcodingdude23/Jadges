@@ -1,0 +1,63 @@
+name: Publish Jadges update manifest
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Generate exact update hashes
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          version = 18
+          root = Path("vencord-plugin/jadgesBadges")
+          names = [
+              "index.tsx",
+              "base.tsx",
+              "native.ts",
+              "style.css",
+              "updater.ts",
+              "updateNative.ts",
+          ]
+
+          manifest = {
+              "version": version,
+              "files": [
+                  {
+                      "path": name,
+                      "sha256": hashlib.sha256((root / name).read_bytes()).hexdigest(),
+                  }
+                  for name in names
+              ],
+          }
+
+          Path("vencord-plugin/update.json").write_text(
+              json.dumps(manifest, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Commit manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add vencord-plugin/update.json
+          git diff --cached --quiet && exit 0
+          git commit -m "Publish Jadges Vencord v18 update"
+          git push
