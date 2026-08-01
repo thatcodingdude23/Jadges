@@ -1,15 +1,15 @@
 {
   "name": "Jadges Badges",
-  "description": "Displays and rearranges Jadges, Nitro, staff, and native Discord profile badges on mobile.",
+  "description": "Displays and rearranges Jadges badges and synchronizes the user's saved Jadges account theme on mobile.",
   "authors": [
     {
       "name": "Jaycord",
       "id": "0"
     }
   ],
-  "main": "index.js",
+  "main": "loader.js",
   "vendetta": {
     "icon": "ic_badge_staff"
   },
-  "hash": "0635ff73612ddd12e0fdacf209ed54f99f28b5d57399ac3dc6d550f96f8da916"
+  "hash": "287b8a81768a5d0dcece24a454664456faee5c6194e309a503f72559ecf91d96"
 }
