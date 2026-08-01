@@ -121,10 +121,11 @@ function restoreControl(control: HTMLElement): void {
     if (control.dataset.jadgesVisibilityHidden !== "true") return;
     delete control.dataset.jadgesVisibilityHidden;
 
-    if (control.dataset.jadgesHiddenKind) return;
     const original = control.dataset.jadgesVisibilityOriginalDisplay;
-    control.style.display = original === "__empty__" ? "" : original || "";
     delete control.dataset.jadgesVisibilityOriginalDisplay;
+    if (control.dataset.jadgesHiddenKind) return;
+
+    control.style.display = original === "__empty__" ? "" : original || "";
 }
 
 function setControlHidden(control: HTMLElement, shouldHide: boolean): void {
@@ -134,7 +135,9 @@ function setControlHidden(control: HTMLElement, shouldHide: boolean): void {
     }
 
     if (!control.dataset.jadgesVisibilityOriginalDisplay) {
-        control.dataset.jadgesVisibilityOriginalDisplay = control.style.display || "__empty__";
+        const discordOriginal = control.dataset.jadgesOriginalDisplay;
+        control.dataset.jadgesVisibilityOriginalDisplay =
+            discordOriginal || control.style.display || "__empty__";
     }
     control.dataset.jadgesVisibilityHidden = "true";
     control.style.display = "none";
