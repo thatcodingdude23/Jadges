@@ -7,6 +7,7 @@
 import definePlugin from "@utils/types";
 
 import basePlugin from "./base";
+import { startThemeSync, stopThemeSync } from "./themeSync";
 import { startUpdateChecker, stopUpdateChecker } from "./updater";
 
 const BADGE_QUERY = 'img[class*="badge"], img.jadges-profile-badge-image';
@@ -165,6 +166,7 @@ async function startWithoutGlobalBadgeClick(): Promise<void> {
     try {
         await (basePlugin as any).start?.();
         startUpdateChecker();
+        startThemeSync();
     } finally {
         document.addEventListener = originalAdd;
     }
@@ -172,13 +174,14 @@ async function startWithoutGlobalBadgeClick(): Promise<void> {
 
 export default definePlugin({
     name: "JadgesBadges",
-    description: "Displays Jadges badges, rearranges native Discord badges, and installs verified Jadges updates.",
+    description: "Displays Jadges badges, rearranges native Discord badges, syncs account themes, and installs verified Jadges updates.",
     authors: [{ name: "Jaycord", id: 0n }],
     dependencies: ["BadgeAPI"],
     options: (basePlugin as any).options,
     start: startWithoutGlobalBadgeClick,
     stop() {
         try {
+            stopThemeSync();
             stopUpdateChecker();
             (basePlugin as any).stop?.();
         } finally {
