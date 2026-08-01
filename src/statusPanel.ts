@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Client, Events } from "discord.js";
@@ -10,7 +11,8 @@ const STATUS_FILE = path.join(config.dataDir, "status-panel.json");
 const UPDATE_INTERVAL_MS = 60_000;
 const ONLINE_EMOJI = "<a:uppp:1533083696343552040>";
 const OFFLINE_EMOJI = "<a:downwnnnn:1533083825192697866>";
-const FOOTER_TEXT = "Jadges • Live Service Status • Checked every minute";
+const FOOTER_PREFIX = "Jadges • Live Service Status";
+const FOOTER_TEXT = `${FOOTER_PREFIX} • Checks every minute • Edits only on change`;
 const VENCORD_MANIFEST_URL =
   "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/vencord-plugin/update.json";
 const REVENGE_VERSION_URL =
@@ -39,7 +41,6 @@ interface DiscordMessage {
 
 interface DiscordChannel {
   id?: string;
-  type?: number;
 }
 
 interface StatusEmbed {
@@ -51,6 +52,42 @@ interface StatusEmbed {
   footer: { text: string };
   timestamp: string;
 }
+
+interface StatusStateFile {
+  channelId: string;
+  messageId?: string;
+  signature?: string;
+}
+
+interface StatusSnapshot {
+  bootStartedAt: number;
+  forceOffline: boolean;
+  botOnline: boolean;
+  apiOnline: boolean;
+  databaseOnline: boolean;
+  reviewOnline: boolean;
+  staffSyncOnline: boolean;
+  rearrangerOnline: boolean;
+  statusMonitorOnline: boolean;
+  securityOnline: boolean;
+  vencordOnline: boolean;
+  vencordVersion: string;
+  revengeOnline: boolean;
+  revengeVersion: string;
+  appVersion: string;
+  users: number;
+  activeBadges: number;
+  pendingReviews: number;
+  nativeBadges: number;
+  blockedUsers: number;
+}
+
+interface BuiltStatus {
+  embed: StatusEmbed;
+  signature: string;
+}
+
+type PublishResult = "created" | "updated" | "unchanged";
 
 export interface StatusPanelHandle {
   stop(markOffline?: boolean): Promise<void>;
@@ -83,6 +120,12 @@ function formatDuration(milliseconds: number): string {
 
 function formatMemory(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function statusSignature(snapshot: StatusSnapshot): string {
+  return createHash("sha256")
+    .update(JSON.stringify(snapshot))
+    .digest("hex");
 }
 
 async function applicationVersion(): Promise<string> {
@@ -228,23 +271,32 @@ async function channelAvailable(channelId: string): Promise<boolean> {
   }
 }
 
-async function loadStatusMessageId(): Promise<string | undefined> {
+async function loadStatusState(): Promise<StatusStateFile> {
   try {
     const raw = await readFile(STATUS_FILE, "utf8");
-    const parsed = JSON.parse(raw) as { channelId?: unknown; messageId?: unknown };
-    return parsed.channelId === STATUS_CHANNEL_ID && typeof parsed.messageId === "string"
-      ? parsed.messageId
-      : undefined;
+    const parsed = JSON.parse(raw) as Partial<StatusStateFile>;
+    if (parsed.channelId !== STATUS_CHANNEL_ID) {
+      return { channelId: STATUS_CHANNEL_ID };
+    }
+    return {
+      channelId: STATUS_CHANNEL_ID,
+      messageId: typeof parsed.messageId === "string" ? parsed.messageId : undefined,
+      signature: typeof parsed.signature === "string" ? parsed.signature : undefined,
+    };
   } catch {
-    return undefined;
+    return { channelId: STATUS_CHANNEL_ID };
   }
 }
 
-async function saveStatusMessageId(messageId: string): Promise<void> {
+async function saveStatusState(messageId: string, signature: string): Promise<void> {
   await mkdir(config.dataDir, { recursive: true });
   await writeFile(
     STATUS_FILE,
-    `${JSON.stringify({ channelId: STATUS_CHANNEL_ID, messageId }, null, 2)}\n`,
+    `${JSON.stringify({
+      channelId: STATUS_CHANNEL_ID,
+      messageId,
+      signature,
+    }, null, 2)}\n`,
     "utf8",
   );
 }
@@ -256,7 +308,9 @@ async function findExistingStatusMessage(botUserId: string): Promise<string | un
     );
     return messages.find((message) =>
       message.author?.id === botUserId &&
-      message.embeds?.some((embed) => embed.footer?.text === FOOTER_TEXT)
+      message.embeds?.some((embed) =>
+        embed.footer?.text?.startsWith(FOOTER_PREFIX)
+      )
     )?.id;
   } catch (error) {
     console.warn("Could not search for the existing Jadges status message:", error);
@@ -264,18 +318,41 @@ async function findExistingStatusMessage(botUserId: string): Promise<string | un
   }
 }
 
+async function messageExists(messageId: string): Promise<boolean> {
+  try {
+    await discordRequest<DiscordMessage>(
+      `/channels/${STATUS_CHANNEL_ID}/messages/${encodeURIComponent(messageId)}`,
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function upsertStatusMessage(
   botUserId: string,
   embed: StatusEmbed,
-): Promise<void> {
+  signature: string,
+  forceWrite: boolean,
+): Promise<PublishResult> {
   const payload = JSON.stringify({
     content: "",
     embeds: [embed],
     allowed_mentions: { parse: [] },
   });
 
-  let messageId = await loadStatusMessageId();
+  const state = await loadStatusState();
+  let messageId = state.messageId;
   if (!messageId) messageId = await findExistingStatusMessage(botUserId);
+
+  if (
+    messageId &&
+    !forceWrite &&
+    state.signature === signature &&
+    await messageExists(messageId)
+  ) {
+    return "unchanged";
+  }
 
   if (messageId) {
     try {
@@ -283,8 +360,8 @@ async function upsertStatusMessage(
         `/channels/${STATUS_CHANNEL_ID}/messages/${encodeURIComponent(messageId)}`,
         { method: "PATCH", body: payload },
       );
-      await saveStatusMessageId(edited.id);
-      return;
+      await saveStatusState(edited.id, signature);
+      return "updated";
     } catch (error) {
       console.warn(
         `Could not edit status message ${messageId}; a new one will be created:`,
@@ -297,42 +374,45 @@ async function upsertStatusMessage(
     `/channels/${STATUS_CHANNEL_ID}/messages`,
     { method: "POST", body: payload },
   );
-  await saveStatusMessageId(created.id);
-  console.log(`Created Jadges status panel message ${created.id}.`);
+  await saveStatusState(created.id, signature);
+  return "created";
 }
 
-async function buildStatusEmbed(
+async function buildStatus(
   client: Client,
   startedAt: number,
   forceOffline: boolean,
-): Promise<StatusEmbed> {
+): Promise<BuiltStatus> {
   const botUser = client.user;
   if (!botUser) throw new Error("Discord bot user is not ready");
 
-  const [api, database, reviewOnline, vencord, revenge, appVersion] = forceOffline
-    ? await Promise.all([
-        Promise.resolve<ServiceCheck>({ online: false }),
-        Promise.resolve<DatabaseSnapshot>({
-          online: false,
-          users: 0,
-          activeBadges: 0,
-          pendingReviews: 0,
-          nativeBadges: 0,
-          blockedUsers: 0,
-        }),
-        Promise.resolve(false),
-        checkJsonEndpoint(VENCORD_MANIFEST_URL),
-        checkJsonEndpoint(REVENGE_VERSION_URL),
-        applicationVersion(),
-      ])
-    : await Promise.all([
-        checkApi(),
-        databaseSnapshot(),
-        channelAvailable(config.promptChannel),
-        checkJsonEndpoint(VENCORD_MANIFEST_URL),
-        checkJsonEndpoint(REVENGE_VERSION_URL),
-        applicationVersion(),
-      ]);
+  const [api, database, reviewOnline, statusMonitorOnline, vencord, revenge, appVersion] =
+    forceOffline
+      ? await Promise.all([
+          Promise.resolve<ServiceCheck>({ online: false }),
+          Promise.resolve<DatabaseSnapshot>({
+            online: false,
+            users: 0,
+            activeBadges: 0,
+            pendingReviews: 0,
+            nativeBadges: 0,
+            blockedUsers: 0,
+          }),
+          Promise.resolve(false),
+          Promise.resolve(false),
+          checkJsonEndpoint(VENCORD_MANIFEST_URL),
+          checkJsonEndpoint(REVENGE_VERSION_URL),
+          applicationVersion(),
+        ])
+      : await Promise.all([
+          checkApi(),
+          databaseSnapshot(),
+          channelAvailable(config.promptChannel),
+          channelAvailable(STATUS_CHANNEL_ID),
+          checkJsonEndpoint(VENCORD_MANIFEST_URL),
+          checkJsonEndpoint(REVENGE_VERSION_URL),
+          applicationVersion(),
+        ]);
 
   const botOnline = !forceOffline && client.isReady();
   const staffSyncOnline =
@@ -343,7 +423,6 @@ async function buildStatusEmbed(
     api.online &&
     isRearrangeConfigured();
   const securityOnline = rearrangerOnline;
-  const statusChannelOnline = !forceOffline;
   const allOnline =
     botOnline &&
     api.online &&
@@ -351,18 +430,42 @@ async function buildStatusEmbed(
     reviewOnline &&
     staffSyncOnline &&
     rearrangerOnline &&
+    statusMonitorOnline &&
     vencord.online &&
     revenge.online;
+
+  const snapshot: StatusSnapshot = {
+    bootStartedAt: startedAt,
+    forceOffline,
+    botOnline,
+    apiOnline: api.online,
+    databaseOnline: database.online,
+    reviewOnline,
+    staffSyncOnline,
+    rearrangerOnline,
+    statusMonitorOnline,
+    securityOnline,
+    vencordOnline: vencord.online,
+    vencordVersion: vencord.version || "Unknown",
+    revengeOnline: revenge.online,
+    revengeVersion: revenge.version || "Unknown",
+    appVersion,
+    users: database.users,
+    activeBadges: database.activeBadges,
+    pendingReviews: database.pendingReviews,
+    nativeBadges: database.nativeBadges,
+    blockedUsers: database.blockedUsers,
+  };
 
   const gatewayLatency =
     botOnline && Number.isFinite(client.ws.ping) && client.ws.ping >= 0
       ? `${Math.round(client.ws.ping)} ms`
       : "Unavailable";
   const apiLatency = api.latency !== undefined ? `${api.latency} ms` : "Unavailable";
-  const checkedAt = Math.floor(Date.now() / 1000);
+  const updatedAt = Math.floor(Date.now() / 1000);
   const memory = process.memoryUsage();
 
-  return {
+  const embed: StatusEmbed = {
     title: "Jadges Service Status",
     description: allOnline
       ? `${ONLINE_EMOJI} All Jadges systems are currently operational.`
@@ -379,7 +482,7 @@ async function buildStatusEmbed(
           statusLine("Badge Review System", reviewOnline),
           statusLine("Staff Badge Sync", staffSyncOnline),
           statusLine("Rearranger", rearrangerOnline),
-          statusLine("Status Monitor", statusChannelOnline),
+          statusLine("Status Monitor", statusMonitorOnline),
         ].join("\n"),
       },
       {
@@ -404,7 +507,7 @@ async function buildStatusEmbed(
           `**API:** V.${appVersion}`,
           `**Vencord:** V.${vencord.version || "Unknown"}`,
           `**Revenge:** V.${revenge.version || "Unknown"}`,
-          "**Status Panel:** V.2",
+          "**Status Panel:** V.3",
         ].join("\n"),
         inline: true,
       },
@@ -439,21 +542,26 @@ async function buildStatusEmbed(
         ].join("\n"),
       },
       {
-        name: "Automatic Update Checks",
+        name: "Automatic Status Checks",
         value: [
-          `**Check interval:** Every minute`,
+          "**Check interval:** Every minute",
           `**Vencord feed:** ${vencord.online ? "Reachable" : "Unavailable"}`,
           `**Revenge feed:** ${revenge.online ? "Reachable" : "Unavailable"}`,
-          "Any version or service change is reflected in this same embed.",
+          "The embed is edited only when a service, version, security state, bot restart, or Jadges statistic changes.",
         ].join("\n"),
       },
       {
-        name: "Last Checked",
-        value: `<t:${checkedAt}:F> • <t:${checkedAt}:R>`,
+        name: "Last Updated",
+        value: `<t:${updatedAt}:F> • <t:${updatedAt}:R>`,
       },
     ],
     footer: { text: FOOTER_TEXT },
     timestamp: new Date().toISOString(),
+  };
+
+  return {
+    embed,
+    signature: statusSignature(snapshot),
   };
 }
 
@@ -461,11 +569,16 @@ async function publishStatus(
   client: Client,
   startedAt: number,
   forceOffline: boolean,
-): Promise<void> {
+): Promise<PublishResult> {
   const botUser = client.user;
   if (!botUser) throw new Error("Discord bot user is not ready");
-  const embed = await buildStatusEmbed(client, startedAt, forceOffline);
-  await upsertStatusMessage(botUser.id, embed);
+  const built = await buildStatus(client, startedAt, forceOffline);
+  return upsertStatusMessage(
+    botUser.id,
+    built.embed,
+    built.signature,
+    forceOffline,
+  );
 }
 
 export function startStatusPanel(client: Client): StatusPanelHandle {
@@ -481,11 +594,17 @@ export function startStatusPanel(client: Client): StatusPanelHandle {
       .then(async () => {
         if (stopped && !forceOffline) return;
         try {
-          await publishStatus(client, startedAt, forceOffline);
-          if (!forceOffline) console.log("Jadges status panel checked and updated.");
+          const result = await publishStatus(client, startedAt, forceOffline);
+          if (forceOffline) {
+            console.log("Jadges status panel marked offline.");
+          } else if (result === "unchanged") {
+            console.log("Jadges status checked; no changes detected, so the embed was not edited.");
+          } else {
+            console.log(`Jadges status panel ${result}.`);
+          }
         } catch (error) {
           console.error(
-            "Jadges status panel update failed; it will retry in one minute:",
+            "Jadges status panel check failed; it will retry in one minute:",
             error,
           );
         }
@@ -497,7 +616,6 @@ export function startStatusPanel(client: Client): StatusPanelHandle {
     if (started || stopped) return;
     started = true;
 
-    // Send immediately, then keep checking and updating the same message every minute.
     void refresh();
     timer = setInterval(() => void refresh(), UPDATE_INTERVAL_MS);
     timer.unref();
