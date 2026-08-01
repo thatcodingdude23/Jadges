@@ -1,0 +1,82 @@
+.badge-card {
+  cursor: pointer;
+}
+
+.badge-card:focus-visible {
+  outline: 2px solid #8b5cf6;
+  outline-offset: 3px;
+}
+
+.badge-card-hidden {
+  border-color: rgba(255, 75, 92, .72) !important;
+  background:
+    linear-gradient(rgba(102, 18, 29, .62), rgba(70, 12, 21, .62)),
+    var(--panel, #111827) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 96, 111, .16),
+    0 12px 34px rgba(90, 0, 12, .22) !important;
+}
+
+.badge-card-hidden .badge-image,
+.badge-card-hidden .badge-name,
+.badge-card-hidden .badge-kind,
+.badge-card-hidden .badge-grip,
+.badge-card-hidden .pin-label,
+.badge-card-hidden .badge-move {
+  opacity: .34;
+}
+
+.badge-hidden-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: none;
+  place-items: center;
+  align-content: center;
+  gap: 7px;
+  border-radius: inherit;
+  color: #fff;
+  pointer-events: none;
+  background: rgba(165, 24, 42, .22);
+  backdrop-filter: blur(1px);
+}
+
+.badge-card-hidden .badge-hidden-overlay {
+  display: grid;
+}
+
+.badge-hidden-shield {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.42);
+  border-radius: 50%;
+  background: rgba(123, 10, 25, .78);
+  box-shadow: 0 8px 24px rgba(62, 0, 8, .36);
+}
+
+.badge-hidden-shield svg {
+  width: 25px;
+  height: 25px;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+
+.badge-hidden-label {
+  padding: 4px 9px;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(112, 8, 22, .9);
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.visibility-preview-empty {
+  color: #ff8996;
+  font-size: 11px;
+  font-weight: 700;
+}
