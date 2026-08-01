@@ -1,35 +1,35 @@
 import { execFile } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
-import { access, mkdir, rename, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { access, cp, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { IpcMainInvokeEvent } from "electron";
+import { app } from "electron";
+import type { IpcMainInvokeEvent } from "electron";
 
 const execFileAsync = promisify(execFile);
 const UPDATE_MANIFEST_URL =
     "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/vencord-plugin/update.json";
-const RAW_PLUGIN_ROOT =
-    "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/vencord-plugin/jadgesBadges/";
+const REPOSITORY_ZIP_URL =
+    "https://github.com/thatcodingdude23/Jadges/archive/refs/heads/main.zip";
+const ARCHIVE_PLUGIN_PATH = path.join(
+    "Jadges-main",
+    "vencord-plugin",
+    "jadgesBadges"
+);
 const PLUGIN_FOLDER_NAME = "jadgesBadges";
-const ALLOWED_FILES = new Set([
+const REQUIRED_PLUGIN_FILES = [
     "index.tsx",
     "base.tsx",
     "native.ts",
     "style.css",
     "updater.ts",
     "updateNative.ts"
-]);
-
-interface UpdateFile {
-    path: string;
-    sha256: string;
-}
+] as const;
 
 interface UpdateManifest {
     version: number;
-    files: UpdateFile[];
 }
 
 export interface JadgesUpdateResult {
@@ -83,72 +83,104 @@ async function findVencordRoot(): Promise<string | undefined> {
     return undefined;
 }
 
-function sha256(content: string): string {
-    return createHash("sha256").update(content, "utf8").digest("hex");
-}
-
-async function fetchText(url: string): Promise<string> {
-    const separator = url.includes("?") ? "&" : "?";
-    const response = await fetch(`${url}${separator}t=${Date.now()}`, {
-        cache: "no-store",
-        signal: AbortSignal.timeout(30_000)
-    });
-    if (!response.ok) throw new Error(`Download returned HTTP ${response.status}`);
-    return response.text();
-}
-
-async function fetchManifest(): Promise<UpdateManifest> {
-    const manifest = JSON.parse(await fetchText(UPDATE_MANIFEST_URL)) as UpdateManifest;
-
-    if (
-        !Number.isSafeInteger(manifest.version)
-        || !Array.isArray(manifest.files)
-        || manifest.files.length !== ALLOWED_FILES.size
-    ) {
-        throw new Error("The update manifest is invalid.");
-    }
-
-    const paths = new Set<string>();
-    for (const file of manifest.files) {
-        if (
-            !file
-            || !ALLOWED_FILES.has(file.path)
-            || paths.has(file.path)
-            || !/^[a-f0-9]{64}$/i.test(file.sha256)
-        ) {
-            throw new Error("The update manifest contains an invalid file.");
-        }
-        paths.add(file.path);
-    }
-
-    return manifest;
-}
-
-async function runPnpm(
-    root: string,
-    script: "build" | "inject"
+async function runCommand(
+    command: string,
+    args: string[],
+    cwd?: string,
+    timeout = 5 * 60 * 1000
 ): Promise<void> {
-    const command = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-
     try {
-        await execFileAsync(command, [script], {
-            cwd: root,
+        await execFileAsync(command, args, {
+            cwd,
             windowsHide: true,
-            timeout: 5 * 60 * 1000,
+            timeout,
             maxBuffer: 16 * 1024 * 1024
         });
     } catch (error) {
         const details = error as { stderr?: string; stdout?: string; message?: string };
         const output = String(details.stderr || details.stdout || details.message || error)
             .trim()
-            .slice(-1500);
-        throw new Error(output || `pnpm ${script} failed`);
+            .slice(-1800);
+        throw new Error(output || `${command} failed`);
     }
 }
 
-async function buildAndInject(root: string): Promise<void> {
-    await runPnpm(root, "build");
-    await runPnpm(root, "inject");
+function powershellLiteral(value: string): string {
+    return `'${value.replaceAll("'", "''")}'`;
+}
+
+async function extractZip(zipFile: string, destination: string): Promise<void> {
+    await mkdir(destination, { recursive: true });
+
+    if (process.platform === "win32") {
+        await runCommand("powershell.exe", [
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            `Expand-Archive -LiteralPath ${powershellLiteral(zipFile)} -DestinationPath ${powershellLiteral(destination)} -Force`
+        ]);
+        return;
+    }
+
+    if (process.platform === "darwin") {
+        await runCommand("ditto", ["-x", "-k", zipFile, destination]);
+        return;
+    }
+
+    await runCommand("unzip", ["-q", "-o", zipFile, "-d", destination]);
+}
+
+async function downloadRepositoryZip(target: string): Promise<void> {
+    const response = await fetch(`${REPOSITORY_ZIP_URL}?t=${Date.now()}`, {
+        cache: "no-store",
+        redirect: "follow",
+        signal: AbortSignal.timeout(60_000)
+    });
+
+    if (!response.ok) {
+        throw new Error(`Repository ZIP download returned HTTP ${response.status}`);
+    }
+
+    const archive = Buffer.from(await response.arrayBuffer());
+    if (archive.length < 100) throw new Error("The downloaded repository ZIP was empty.");
+    await writeFile(target, archive);
+}
+
+async function fetchLatestVersion(): Promise<number> {
+    const response = await fetch(`${UPDATE_MANIFEST_URL}?t=${Date.now()}`, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(30_000)
+    });
+    if (!response.ok) throw new Error(`Update information returned HTTP ${response.status}`);
+
+    const manifest = await response.json() as UpdateManifest;
+    if (!Number.isSafeInteger(manifest.version) || manifest.version <= 0) {
+        throw new Error("The update information is invalid.");
+    }
+    return manifest.version;
+}
+
+async function validatePluginFolder(folder: string): Promise<void> {
+    for (const filename of REQUIRED_PLUGIN_FILES) {
+        if (!await exists(path.join(folder, filename))) {
+            throw new Error(`The repository ZIP is missing ${filename}.`);
+        }
+    }
+}
+
+async function runPnpmBuild(root: string): Promise<void> {
+    const command = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+    await runCommand(command, ["build"], root);
+}
+
+function scheduleDiscordRestart(): void {
+    const timer = setTimeout(() => {
+        app.relaunch();
+        app.exit(0);
+    }, 1500);
+    timer.unref();
 }
 
 export async function installLatestUpdate(
@@ -167,20 +199,25 @@ export async function installLatestUpdate(
     const suffix = `${Date.now()}-${randomUUID()}`;
     const staging = path.join(userplugins, `.${PLUGIN_FOLDER_NAME}-update-${suffix}`);
     const backup = path.join(userplugins, `.${PLUGIN_FOLDER_NAME}-backup-${suffix}`);
+    const temporary = await mkdtemp(path.join(tmpdir(), "jadges-update-"));
+    const archive = path.join(temporary, "Jadges-main.zip");
+    const extracted = path.join(temporary, "extracted");
+
     let movedOld = false;
     let installedNew = false;
 
     try {
-        const manifest = await fetchManifest();
-        await mkdir(staging);
+        const version = await fetchLatestVersion();
+        await downloadRepositoryZip(archive);
+        await extractZip(archive, extracted);
 
-        for (const file of manifest.files) {
-            const content = await fetchText(`${RAW_PLUGIN_ROOT}${file.path}`);
-            if (sha256(content) !== file.sha256.toLowerCase()) {
-                throw new Error(`Hash check failed for ${file.path}`);
-            }
-            await writeFile(path.join(staging, file.path), content, "utf8");
-        }
+        const source = path.join(extracted, ARCHIVE_PLUGIN_PATH);
+        await validatePluginFolder(source);
+        await cp(source, staging, {
+            recursive: true,
+            force: false,
+            errorOnExist: true
+        });
 
         if (await exists(plugin)) {
             await rename(plugin, backup);
@@ -189,13 +226,16 @@ export async function installLatestUpdate(
 
         await rename(staging, plugin);
         installedNew = true;
-        await buildAndInject(root);
+
+        await runPnpmBuild(root);
 
         if (movedOld) await rm(backup, { recursive: true, force: true });
+        scheduleDiscordRestart();
+
         return {
             ok: true,
-            version: manifest.version,
-            message: "Jadges was updated, rebuilt, and injected successfully."
+            version,
+            message: "Jadges was replaced from the repository ZIP and rebuilt. Discord is restarting."
         };
     } catch (error) {
         const reason = error instanceof Error ? error.message : "The update failed.";
@@ -204,7 +244,7 @@ export async function installLatestUpdate(
             if (installedNew) await rm(plugin, { recursive: true, force: true });
             if (movedOld && await exists(backup)) await rename(backup, plugin);
             if (await exists(staging)) await rm(staging, { recursive: true, force: true });
-            if (movedOld) await buildAndInject(root);
+            if (movedOld) await runPnpmBuild(root);
         } catch (rollbackError) {
             const recovery = rollbackError instanceof Error
                 ? rollbackError.message
@@ -219,5 +259,7 @@ export async function installLatestUpdate(
             ok: false,
             message: `The update was rolled back: ${reason}`
         };
+    } finally {
+        await rm(temporary, { recursive: true, force: true }).catch(() => undefined);
     }
 }
