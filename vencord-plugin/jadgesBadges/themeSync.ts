@@ -1,5 +1,5 @@
 import { Settings } from "@api/Settings";
-import { findByCodeLazy } from "@webpack";
+import { findByCodeLazy, findStoreLazy } from "@webpack";
 import { ThemeStore, UserStore } from "@webpack/common";
 
 type ThemeMode = "dark" | "light";
@@ -11,6 +11,10 @@ interface AccountTheme {
     angle: number;
     intensity: number;
     updatedAt?: string;
+}
+
+interface NitroThemeStoreLike {
+    gradientPreset?: unknown;
 }
 
 type SettingsFeed = Record<string, { theme?: Partial<AccountTheme>; }>;
@@ -25,6 +29,7 @@ const saveDiscordTheme = findByCodeLazy(
     'type:"UNSYNCED_USER_SETTINGS_UPDATE',
     '"system"==='
 ) as ((settings: { theme: string; }) => void);
+const NitroThemeStore = findStoreLazy("ClientThemesBackgroundStore") as NitroThemeStoreLike;
 
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
 let lastSignature = "";
@@ -81,6 +86,10 @@ function isJadgesThemeLink(value: string): boolean {
     return value.includes(THEME_MARKER);
 }
 
+function hasActiveNitroTheme(): boolean {
+    return NitroThemeStore?.gradientPreset != null;
+}
+
 function setThemeLink(link: string | undefined): void {
     const existing = Array.isArray(Settings.themeLinks)
         ? Settings.themeLinks.filter((value: string) => typeof value === "string" && !isJadgesThemeLink(value))
@@ -100,12 +109,15 @@ function buildThemeLink(userId: string, theme: AccountTheme): string {
 
 function setDiscordTheme(mode: ThemeMode): void {
     if (!originalDiscordTheme) originalDiscordTheme = ThemeStore.theme;
-    if (ThemeStore.theme === mode) return;
+
+    // Re-saving the current Discord mode disables an active Nitro client theme.
+    // Do not skip this call while ClientThemesBackgroundStore still has a gradient preset.
+    if (ThemeStore.theme === mode && !hasActiveNitroTheme()) return;
 
     try {
         saveDiscordTheme({ theme: mode });
     } catch (error) {
-        console.warn("[JadgesBadges] Could not switch Discord's theme mode:", error);
+        console.warn("[JadgesBadges] Could not replace Discord's Nitro theme:", error);
     }
 }
 
