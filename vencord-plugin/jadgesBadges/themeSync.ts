@@ -1,4 +1,11 @@
 import { Settings } from "@api/Settings";
+import { managedStyleRootNode } from "@api/Styles";
+import {
+    createOrUpdateThemeColorVars,
+    disableClientTheme,
+    startClientTheme
+} from "@plugins/clientTheme/utils/styleUtils";
+import { createAndAppendStyle } from "@utils/css";
 import { findByCodeLazy, findStoreLazy } from "@webpack";
 import { ThemeStore, UserStore } from "@webpack/common";
 
@@ -22,9 +29,13 @@ type SettingsFeed = Record<string, { theme?: Partial<AccountTheme>; }>;
 const DEFAULT_API_URL = "https://jadges.onrender.com/badges.json";
 const REFRESH_INTERVAL = 5_000;
 const THEME_MARKER = "jadges-account-theme=1";
+const EXTRA_STYLE_ID = "jadges-client-theme-extra";
 const LEGACY_STYLE_ID = "jadges-account-theme-style";
 const LEGACY_ROOT_ATTRIBUTE = "data-jadges-account-theme";
 const HEX_COLOR = /^#[0-9A-F]{6}$/;
+
+// This is the same Discord user-settings action used by Vencord's ClientTheme
+// settings screen. Re-saving the base mode disables an active Nitro theme.
 const saveDiscordTheme = findByCodeLazy(
     'type:"UNSYNCED_USER_SETTINGS_UPDATE',
     '"system"==='
@@ -32,8 +43,10 @@ const saveDiscordTheme = findByCodeLazy(
 const NitroThemeStore = findStoreLazy("ClientThemesBackgroundStore") as NitroThemeStoreLike;
 
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
+let refreshing = false;
 let lastSignature = "";
-let activeThemeLink: string | undefined;
+let clientThemeStarted = false;
+let extraStyle: HTMLStyleElement | undefined;
 let originalDiscordTheme: string | undefined;
 
 function normalizeApiUrl(value: unknown): string {
@@ -82,37 +95,94 @@ function normalizeTheme(value: unknown): AccountTheme | undefined {
     };
 }
 
-function isJadgesThemeLink(value: string): boolean {
-    return value.includes(THEME_MARKER);
+function parseRgb(hex: string): [number, number, number] {
+    return [
+        Number.parseInt(hex.slice(1, 3), 16),
+        Number.parseInt(hex.slice(3, 5), 16),
+        Number.parseInt(hex.slice(5, 7), 16)
+    ];
 }
 
-function hasActiveNitroTheme(): boolean {
-    return NitroThemeStore?.gradientPreset != null;
+function rgbHex(red: number, green: number, blue: number): string {
+    return `#${[red, green, blue]
+        .map(value => Math.round(Math.min(255, Math.max(0, value))).toString(16).padStart(2, "0"))
+        .join("")}`.toUpperCase();
 }
 
-function setThemeLink(link: string | undefined): void {
-    const existing = Array.isArray(Settings.themeLinks)
-        ? Settings.themeLinks.filter((value: string) => typeof value === "string" && !isJadgesThemeLink(value))
-        : [];
-    const next = link ? [...existing, link] : existing;
+function mixHex(base: string, tint: string, ratio: number): string {
+    const [baseRed, baseGreen, baseBlue] = parseRgb(base);
+    const [tintRed, tintGreen, tintBlue] = parseRgb(tint);
+    const amount = Math.min(1, Math.max(0, ratio));
+    return rgbHex(
+        baseRed + (tintRed - baseRed) * amount,
+        baseGreen + (tintGreen - baseGreen) * amount,
+        baseBlue + (tintBlue - baseBlue) * amount
+    );
+}
 
-    if (JSON.stringify(Settings.themeLinks) !== JSON.stringify(next)) {
-        Settings.themeLinks = next;
+function rgba(hex: string, alpha: number): string {
+    const [red, green, blue] = parseRgb(hex);
+    return `rgba(${red}, ${green}, ${blue}, ${Math.min(1, Math.max(0, alpha)).toFixed(3)})`;
+}
+
+function effectiveClientThemeColor(theme: AccountTheme): string {
+    const neutral = theme.mode === "light" ? "#F2F3F5" : "#313338";
+    return mixHex(neutral, theme.colors[0]!, theme.intensity / 100).slice(1);
+}
+
+function gradient(theme: AccountTheme): string {
+    const alpha = theme.intensity / 100 * 0.34;
+    const stops = theme.colors.map((color, index) => {
+        const position = theme.colors.length === 1
+            ? 50
+            : Math.round(index * 100 / (theme.colors.length - 1));
+        return `${rgba(color, alpha)} ${position}%`;
+    });
+    return `linear-gradient(${theme.angle}deg, ${stops.join(", ")})`;
+}
+
+function extraCss(theme: AccountTheme): string {
+    const primary = theme.colors[0]!;
+    const secondary = theme.colors[1] || primary;
+    const appGradient = gradient(theme);
+
+    return `
+:root {
+    --brand-260: ${secondary} !important;
+    --brand-360: ${primary} !important;
+    --brand-500: ${primary} !important;
+    --brand-560: ${mixHex(primary, "#000000", 0.14)} !important;
+    --text-link: ${primary} !important;
+    --text-brand: ${primary} !important;
+    --jadges-client-gradient: ${appGradient};
+}
+
+html,
+body,
+#app-mount {
+    background-image: var(--jadges-client-gradient) !important;
+    background-color: var(--background-primary) !important;
+    background-attachment: fixed !important;
+}
+`;
+}
+
+function removeLegacyThemeLink(): void {
+    const links = Array.isArray(Settings.themeLinks) ? Settings.themeLinks : [];
+    const cleaned = links.filter((value: string) =>
+        typeof value === "string" && !value.includes(THEME_MARKER)
+    );
+    if (JSON.stringify(links) !== JSON.stringify(cleaned)) {
+        Settings.themeLinks = cleaned;
     }
-    activeThemeLink = link;
+
+    document.getElementById(LEGACY_STYLE_ID)?.remove();
+    document.documentElement.removeAttribute(LEGACY_ROOT_ATTRIBUTE);
 }
 
-function buildThemeLink(userId: string, theme: AccountTheme): string {
-    const version = encodeURIComponent(theme.updatedAt || JSON.stringify(theme));
-    return `${apiRoot()}/themes/${encodeURIComponent(userId)}.css?${THEME_MARKER}&v=${version}`;
-}
-
-function setDiscordTheme(mode: ThemeMode): void {
+function setDiscordTheme(mode: ThemeMode, force = false): void {
     if (!originalDiscordTheme) originalDiscordTheme = ThemeStore.theme;
-
-    // Re-saving the current Discord mode disables an active Nitro client theme.
-    // Do not skip this call while ClientThemesBackgroundStore still has a gradient preset.
-    if (ThemeStore.theme === mode && !hasActiveNitroTheme()) return;
+    if (!force && ThemeStore.theme === mode) return;
 
     try {
         saveDiscordTheme({ theme: mode });
@@ -134,32 +204,73 @@ function restoreDiscordTheme(): void {
     }
 }
 
-function removeLegacyThemeInjection(): void {
-    document.getElementById(LEGACY_STYLE_ID)?.remove();
-    document.documentElement.removeAttribute(LEGACY_ROOT_ATTRIBUTE);
+function updateExtraStyle(theme: AccountTheme): void {
+    extraStyle ??= createAndAppendStyle(EXTRA_STYLE_ID, managedStyleRootNode);
+    extraStyle.textContent = extraCss(theme);
 }
 
-function applyTheme(userId: string, theme: AccountTheme): void {
+async function applyTheme(theme: AccountTheme): Promise<void> {
     const signature = JSON.stringify(theme);
-    const link = buildThemeLink(userId, theme);
-    setDiscordTheme(theme.mode);
 
-    if (signature === lastSignature && activeThemeLink === link) return;
+    // If the user turns a Nitro theme back on while Jadges is active, clear it
+    // immediately using the same action as Vencord's own ClientTheme plugin.
+    if (signature === lastSignature) {
+        if (NitroThemeStore?.gradientPreset != null) {
+            setDiscordTheme(theme.mode, true);
+        }
+        return;
+    }
+
     lastSignature = signature;
-    setThemeLink(link);
+    removeLegacyThemeLink();
+
+    // Always re-save the base mode for a newly applied Jadges theme. Discord
+    // treats this as selecting Dark/Light and removes the active Nitro preset.
+    setDiscordTheme(theme.mode, true);
+
+    const color = effectiveClientThemeColor(theme);
+    if (!clientThemeStarted) {
+        await startClientTheme(color);
+        clientThemeStarted = true;
+    } else {
+        createOrUpdateThemeColorVars(color);
+    }
+    updateExtraStyle(theme);
 }
 
-function removeTheme(): void {
+async function restoreVencordClientTheme(): Promise<void> {
+    const clientTheme = Settings.plugins.ClientTheme;
+    if (!clientTheme?.enabled || typeof clientTheme.color !== "string") return;
+
+    const color = clientTheme.color.replace(/^#/, "");
+    if (/^[0-9A-F]{6}$/i.test(color)) {
+        await startClientTheme(color);
+        clientThemeStarted = true;
+    }
+}
+
+async function removeTheme(): Promise<void> {
+    if (!lastSignature && !clientThemeStarted && !extraStyle) {
+        removeLegacyThemeLink();
+        return;
+    }
+
     lastSignature = "";
-    setThemeLink(undefined);
+    extraStyle?.remove();
+    extraStyle = undefined;
+    disableClientTheme();
+    clientThemeStarted = false;
+    removeLegacyThemeLink();
     restoreDiscordTheme();
-    removeLegacyThemeInjection();
+    await restoreVencordClientTheme();
 }
 
 async function refreshTheme(): Promise<void> {
+    if (refreshing) return;
     const userId = UserStore.getCurrentUser()?.id;
     if (!userId) return;
 
+    refreshing = true;
     try {
         const response = await fetch(`${apiRoot()}/settings.json`, {
             cache: "no-store",
@@ -173,16 +284,18 @@ async function refreshTheme(): Promise<void> {
         }
 
         const theme = normalizeTheme((data as SettingsFeed)[userId]?.theme);
-        if (theme) applyTheme(userId, theme);
-        else removeTheme();
+        if (theme) await applyTheme(theme);
+        else await removeTheme();
     } catch (error) {
         console.error("[JadgesBadges] Failed to synchronize the account theme:", error);
+    } finally {
+        refreshing = false;
     }
 }
 
 export function startThemeSync(): void {
     clearInterval(refreshTimer);
-    removeLegacyThemeInjection();
+    removeLegacyThemeLink();
     void refreshTheme();
     refreshTimer = setInterval(() => void refreshTheme(), REFRESH_INTERVAL);
 }
@@ -190,5 +303,6 @@ export function startThemeSync(): void {
 export function stopThemeSync(): void {
     clearInterval(refreshTimer);
     refreshTimer = undefined;
-    removeTheme();
+    refreshing = false;
+    void removeTheme();
 }
