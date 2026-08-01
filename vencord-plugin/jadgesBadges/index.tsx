@@ -9,6 +9,7 @@ import definePlugin from "@utils/types";
 import basePlugin from "./base";
 import { startThemeSync, stopThemeSync } from "./themeSync";
 import { startUpdateChecker, stopUpdateChecker } from "./updater";
+import { startVisibilitySync, stopVisibilitySync } from "./visibilitySync";
 
 const BADGE_QUERY = 'img[class*="badge"], img.jadges-profile-badge-image';
 
@@ -167,6 +168,7 @@ async function startWithoutGlobalBadgeClick(): Promise<void> {
         await (basePlugin as any).start?.();
         startUpdateChecker();
         startThemeSync();
+        startVisibilitySync();
     } finally {
         document.addEventListener = originalAdd;
     }
@@ -181,6 +183,7 @@ export default definePlugin({
     start: startWithoutGlobalBadgeClick,
     stop() {
         try {
+            stopVisibilitySync();
             stopThemeSync();
             stopUpdateChecker();
             (basePlugin as any).stop?.();
