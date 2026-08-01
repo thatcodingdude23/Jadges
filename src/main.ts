@@ -3,13 +3,17 @@ import { installBrandIntegration } from "./brandIntegration.js";
 import { config } from "./config.js";
 import { installDesktopThemeIntegration } from "./desktopThemeIntegration.js";
 import { startDiscordBot } from "./discord.js";
+import { installFinalAssetIntegration } from "./finalAssetIntegration.js";
 import { installPreviewIntegration } from "./previewIntegration.js";
 import { installRearrangeSecurity } from "./rearrangeSecurity.js";
 import { startServer } from "./server.js";
 import { startStatusPanel } from "./statusPanel.js";
+import { installVisibilityIntegration } from "./visibilityIntegration.js";
 import { installWebsiteIntegration } from "./websiteIntegration.js";
 
 await mkdir(config.imagesDir, { recursive: true });
+installFinalAssetIntegration();
+installVisibilityIntegration();
 installDesktopThemeIntegration();
 installPreviewIntegration();
 installBrandIntegration();
