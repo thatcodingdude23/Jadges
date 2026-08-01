@@ -14,11 +14,19 @@ const ADMIN_ROLE_ID = "1531693475181887580";
 const ROLE_CACHE_MS = 60_000;
 
 type StaffAccess = "staff" | "admin" | "none";
+type SignedIdentityPayload = SessionPayload | TicketPayload;
 
 interface SessionPayload {
   kind: "session";
   userId: string;
   expiresAt: number;
+}
+
+interface TicketPayload {
+  kind: "ticket";
+  userId: string;
+  expiresAt: number;
+  nonce: string;
 }
 
 interface RoleCacheEntry {
@@ -54,7 +62,10 @@ function signature(value: string): string {
     .digest("base64url");
 }
 
-function verifySession(token: string | undefined): SessionPayload | undefined {
+function verifyIdentityPayload<T extends SignedIdentityPayload>(
+  token: string | undefined,
+  kind: T["kind"],
+): T | undefined {
   if (!token) return undefined;
   const [body, suppliedSignature, extra] = token.split(".");
   if (!body || !suppliedSignature || extra) return undefined;
@@ -68,15 +79,15 @@ function verifySession(token: string | undefined): SessionPayload | undefined {
   try {
     const payload = JSON.parse(
       Buffer.from(body, "base64url").toString("utf8"),
-    ) as SessionPayload;
+    ) as SignedIdentityPayload;
     if (
-      payload.kind !== "session" ||
+      payload.kind !== kind ||
       payload.expiresAt <= Date.now() ||
       !/^\d{15,22}$/.test(payload.userId)
     ) {
       return undefined;
     }
-    return payload;
+    return payload as T;
   } catch {
     return undefined;
   }
@@ -90,10 +101,25 @@ function sessionUserId(request: IncomingMessage): string | undefined {
   const raw = cookie?.slice(SESSION_COOKIE.length + 1);
   if (!raw) return undefined;
   try {
-    return verifySession(decodeURIComponent(raw))?.userId;
+    return verifyIdentityPayload<SessionPayload>(
+      decodeURIComponent(raw),
+      "session",
+    )?.userId;
   } catch {
     return undefined;
   }
+}
+
+function matchingRearrangeSession(
+  request: IncomingMessage,
+  url: URL,
+): boolean {
+  const sessionId = sessionUserId(request);
+  const ticket = verifyIdentityPayload<TicketPayload>(
+    url.searchParams.get("ticket") || undefined,
+    "ticket",
+  );
+  return Boolean(sessionId && ticket && sessionId === ticket.userId);
 }
 
 async function refreshUserAccess(userId: string): Promise<void> {
@@ -149,10 +175,27 @@ function resolveStaffBadge(
   return undefined;
 }
 
+function redirect(response: ServerResponse, location: string): void {
+  response.writeHead(302, {
+    location,
+    "cache-control": "no-store",
+  });
+  response.end();
+}
+
 function wrap(listener: RequestListener): RequestListener {
   return (request: IncomingMessage, response: ServerResponse) => {
     const run = async (): Promise<void> => {
       const url = new URL(request.url || "/", config.publicUrl);
+
+      if (
+        url.pathname === "/rearrange" &&
+        matchingRearrangeSession(request, url)
+      ) {
+        redirect(response, "/dashboard");
+        return;
+      }
+
       if (url.pathname === "/dashboard" || url.pathname === "/api/dashboard") {
         const userId = sessionUserId(request);
         if (userId) await refreshUserAccess(userId);
