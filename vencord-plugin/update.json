@@ -1,5 +1,5 @@
 {
-  "version": 14,
+  "version": 16,
   "files": [
     {
       "path": "index.tsx",
@@ -15,15 +15,15 @@
     },
     {
       "path": "style.css",
-      "sha256": "ee44c6e36f3d76be594dc579e99b0156afc06092b272a5f3a2f6b559af02a310"
+      "sha256": "43d1eb74190834f493295fdd6310c3b6ec0e129f34a892f1290a7321a4297da0"
     },
     {
       "path": "updater.ts",
-      "sha256": "7f368f9e3d94af32c5e2d8a75e4e4834c7e07019b155948634249ec651873f1d"
+      "sha256": "549121431765bd0ee1410a5c440baaf3d621451ef07b93a15ed945d46b41252f"
     },
     {
       "path": "updateNative.ts",
-      "sha256": "f7b44cd4cc8bdf65adac01d6afa27d66df7557d60471ee59ad540d0ffd790808"
+      "sha256": "7ea73a7c207752864b194c625043db870c08f32dea46b9101ccfbf7b70b81330"
     }
   ]
 }
