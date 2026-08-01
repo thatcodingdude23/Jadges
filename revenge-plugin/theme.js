@@ -105,11 +105,15 @@
       return;
     }
 
-    if (typeof vendetta.themes?.fetchTheme !== "function") {
+    if (
+      typeof vendetta.themes?.fetchTheme !== "function" ||
+      typeof vendetta.themes?.selectTheme !== "function"
+    ) {
       throw new Error("Revenge theme API is unavailable");
     }
 
-    await vendetta.themes.fetchTheme(url, true);
+    await vendetta.themes.fetchTheme(url, false);
+    await vendetta.themes.selectTheme(url);
     syncState = {
       userId,
       themeUrl: url,
@@ -125,9 +129,17 @@
   async function removeTheme(userId) {
     if (syncState.userId !== userId || syncState.active !== true) return;
 
-    if (typeof vendetta.themes?.selectTheme === "function") {
+    const previousUrl = syncState.themeUrl;
+    if (previousUrl && typeof vendetta.themes?.removeTheme === "function") {
+      try {
+        await vendetta.themes.removeTheme(previousUrl);
+      } catch {
+        await vendetta.themes.selectTheme?.("default");
+      }
+    } else if (typeof vendetta.themes?.selectTheme === "function") {
       await vendetta.themes.selectTheme("default");
     }
+
     syncState = {
       userId,
       signature: "",
