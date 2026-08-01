@@ -1,6 +1,6 @@
 import { PluginNative } from "@utils/types";
 
-const CURRENT_UPDATE_VERSION = 19;
+const CURRENT_UPDATE_VERSION = 20;
 const UPDATE_MANIFEST_URL =
     "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/vencord-plugin/update.json";
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
@@ -61,12 +61,12 @@ function showUpdate(version: number): void {
     const copy = text(
         "p",
         "jadges-update-copy",
-        "Download the Jadges repository ZIP, replace the old plugin folder, and rebuild Vencord."
+        "Install the update inside Discord with a live loading screen, percentage, and build logs."
     );
     const status = text(
         "p",
         "jadges-update-status",
-        "Discord restarts automatically when installation finishes."
+        "Discord will pause during installation and restart automatically at 100%."
     );
     const actions = document.createElement("div");
     actions.className = "jadges-update-actions";
@@ -77,16 +77,13 @@ function showUpdate(version: number): void {
         if (installing) return;
         installing = true;
         install.disabled = true;
-        install.textContent = "Updating…";
+        install.textContent = "Opening installer…";
         status.classList.remove("jadges-update-status-error");
-        status.textContent = "Downloading ZIP, replacing the plugin folder, and running pnpm build…";
+        status.textContent = "Switching Discord to the Jadges installer screen…";
 
         try {
             const result = await Native.installLatestUpdate();
             if (!result.ok) throw new Error(result.message || "The update failed.");
-
-            install.textContent = "Installed";
-            status.textContent = "Update installed. Discord is restarting…";
         } catch (error) {
             status.classList.add("jadges-update-status-error");
             status.textContent = error instanceof Error ? error.message : "The update failed.";
