@@ -3,14 +3,17 @@ import { config } from "./config.js";
 import { startDiscordBot } from "./discord.js";
 import { installRearrangeSecurity } from "./rearrangeSecurity.js";
 import { startServer } from "./server.js";
+import { startStatusPanel } from "./statusPanel.js";
 
 await mkdir(config.imagesDir, { recursive: true });
 installRearrangeSecurity();
 const server = startServer();
 const client = await startDiscordBot();
+const statusPanel = startStatusPanel(client);
 
 async function shutdown(signal: string): Promise<void> {
   console.log(`Received ${signal}; shutting down.`);
+  await statusPanel.stop(true);
   server.close();
   client.destroy();
   process.exit(0);
