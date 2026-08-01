@@ -1,23 +1,20 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { access, cp, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { access, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
 import { app } from "electron";
 import type { IpcMainInvokeEvent } from "electron";
+import { unzipSync } from "fflate";
 
 const execFileAsync = promisify(execFile);
 const UPDATE_MANIFEST_URL =
     "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/vencord-plugin/update.json";
 const REPOSITORY_ZIP_URL =
     "https://github.com/thatcodingdude23/Jadges/archive/refs/heads/main.zip";
-const ARCHIVE_PLUGIN_PATH = path.join(
-    "Jadges-main",
-    "vencord-plugin",
-    "jadgesBadges"
-);
+const ARCHIVE_PLUGIN_PREFIX = "Jadges-main/vencord-plugin/jadgesBadges/";
 const PLUGIN_FOLDER_NAME = "jadgesBadges";
 const REQUIRED_PLUGIN_FILES = [
     "index.tsx",
@@ -105,34 +102,7 @@ async function runCommand(
     }
 }
 
-function powershellLiteral(value: string): string {
-    return `'${value.replaceAll("'", "''")}'`;
-}
-
-async function extractZip(zipFile: string, destination: string): Promise<void> {
-    await mkdir(destination, { recursive: true });
-
-    if (process.platform === "win32") {
-        await runCommand("powershell.exe", [
-            "-NoProfile",
-            "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            `Expand-Archive -LiteralPath ${powershellLiteral(zipFile)} -DestinationPath ${powershellLiteral(destination)} -Force`
-        ]);
-        return;
-    }
-
-    if (process.platform === "darwin") {
-        await runCommand("ditto", ["-x", "-k", zipFile, destination]);
-        return;
-    }
-
-    await runCommand("unzip", ["-q", "-o", zipFile, "-d", destination]);
-}
-
-async function downloadRepositoryZip(target: string): Promise<void> {
+async function downloadRepositoryZip(): Promise<Uint8Array> {
     const response = await fetch(`${REPOSITORY_ZIP_URL}?t=${Date.now()}`, {
         cache: "no-store",
         redirect: "follow",
@@ -143,9 +113,46 @@ async function downloadRepositoryZip(target: string): Promise<void> {
         throw new Error(`Repository ZIP download returned HTTP ${response.status}`);
     }
 
-    const archive = Buffer.from(await response.arrayBuffer());
+    const archive = new Uint8Array(await response.arrayBuffer());
     if (archive.length < 100) throw new Error("The downloaded repository ZIP was empty.");
-    await writeFile(target, archive);
+    return archive;
+}
+
+async function extractPluginFromZip(
+    archive: Uint8Array,
+    destination: string
+): Promise<void> {
+    const files = unzipSync(archive);
+    const root = path.resolve(destination);
+    const rootPrefix = `${root}${path.sep}`;
+    let extractedFiles = 0;
+
+    await mkdir(destination, { recursive: true });
+
+    for (const [archivePath, data] of Object.entries(files)) {
+        if (!archivePath.startsWith(ARCHIVE_PLUGIN_PREFIX)) continue;
+
+        const relative = archivePath.slice(ARCHIVE_PLUGIN_PREFIX.length);
+        if (!relative || relative.endsWith("/")) continue;
+
+        const normalized = path.posix.normalize(relative);
+        if (normalized === ".." || normalized.startsWith("../")) {
+            throw new Error("The repository ZIP contains an unsafe path.");
+        }
+
+        const target = path.resolve(destination, ...normalized.split("/"));
+        if (!target.startsWith(rootPrefix)) {
+            throw new Error("The repository ZIP contains an unsafe path.");
+        }
+
+        await mkdir(path.dirname(target), { recursive: true });
+        await writeFile(target, Buffer.from(data));
+        extractedFiles++;
+    }
+
+    if (extractedFiles === 0) {
+        throw new Error("The Jadges plugin folder was not found in the repository ZIP.");
+    }
 }
 
 async function fetchLatestVersion(): Promise<number> {
@@ -171,8 +178,13 @@ async function validatePluginFolder(folder: string): Promise<void> {
 }
 
 async function runPnpmBuild(root: string): Promise<void> {
-    const command = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-    await runCommand(command, ["build"], root);
+    if (process.platform === "win32") {
+        const command = process.env.ComSpec || process.env.COMSPEC || "cmd.exe";
+        await runCommand(command, ["/d", "/s", "/c", "pnpm.cmd build"], root);
+        return;
+    }
+
+    await runCommand("pnpm", ["build"], root);
 }
 
 function scheduleDiscordRestart(): void {
@@ -199,25 +211,15 @@ export async function installLatestUpdate(
     const suffix = `${Date.now()}-${randomUUID()}`;
     const staging = path.join(userplugins, `.${PLUGIN_FOLDER_NAME}-update-${suffix}`);
     const backup = path.join(userplugins, `.${PLUGIN_FOLDER_NAME}-backup-${suffix}`);
-    const temporary = await mkdtemp(path.join(tmpdir(), "jadges-update-"));
-    const archive = path.join(temporary, "Jadges-main.zip");
-    const extracted = path.join(temporary, "extracted");
 
     let movedOld = false;
     let installedNew = false;
 
     try {
         const version = await fetchLatestVersion();
-        await downloadRepositoryZip(archive);
-        await extractZip(archive, extracted);
-
-        const source = path.join(extracted, ARCHIVE_PLUGIN_PATH);
-        await validatePluginFolder(source);
-        await cp(source, staging, {
-            recursive: true,
-            force: false,
-            errorOnExist: true
-        });
+        const archive = await downloadRepositoryZip();
+        await extractPluginFromZip(archive, staging);
+        await validatePluginFolder(staging);
 
         if (await exists(plugin)) {
             await rename(plugin, backup);
@@ -259,7 +261,5 @@ export async function installLatestUpdate(
             ok: false,
             message: `The update was rolled back: ${reason}`
         };
-    } finally {
-        await rm(temporary, { recursive: true, force: true }).catch(() => undefined);
     }
 }
