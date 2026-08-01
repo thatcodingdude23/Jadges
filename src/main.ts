@@ -4,8 +4,10 @@ import { startDiscordBot } from "./discord.js";
 import { installRearrangeSecurity } from "./rearrangeSecurity.js";
 import { startServer } from "./server.js";
 import { startStatusPanel } from "./statusPanel.js";
+import { installWebsiteIntegration } from "./websiteIntegration.js";
 
 await mkdir(config.imagesDir, { recursive: true });
+installWebsiteIntegration();
 installRearrangeSecurity();
 const server = startServer();
 const client = await startDiscordBot();
