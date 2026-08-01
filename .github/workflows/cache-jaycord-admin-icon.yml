@@ -1,0 +1,56 @@
+name: Cache Jaycord Admin icon
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/config.ts"
+      - ".github/workflows/cache-jaycord-admin-icon.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cache-icon:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download official Admin icon
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+
+          url = "https://media.discordapp.net/attachments/1532351165688316065/1532783355861401692/cdn.discordapp_3.png?ex=6a6ec3fd&is=6a6d727d&hm=ee5fabf9e4149819cf8a80517ec6a53a09f2023a23e06d001380fe488f03bb50&=&format=webp&quality=lossless"
+          request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+          with urlopen(request, timeout=60) as response:
+              data = response.read()
+              content_type = response.headers.get_content_type()
+
+          if len(data) < 100:
+              raise SystemExit("Admin icon download was unexpectedly small")
+          if content_type not in {"image/webp", "image/png", "application/octet-stream"}:
+              raise SystemExit(f"Unexpected content type: {content_type}")
+          if not (data.startswith(b"RIFF") or data.startswith(b"\x89PNG\r\n\x1a\n")):
+              raise SystemExit("Downloaded file is not a WebP or PNG image")
+
+          target = Path("assets/jaycord-admin.webp")
+          target.parent.mkdir(parents=True, exist_ok=True)
+          target.write_bytes(data)
+          print(f"Saved {len(data)} bytes to {target}")
+          PY
+
+      - name: Commit permanent Admin icon
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/jaycord-admin.webp
+          git diff --cached --quiet && exit 0
+          git commit -m "Cache official Jaycord Admin icon"
+          git push
