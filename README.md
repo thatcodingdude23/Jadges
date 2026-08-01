@@ -110,4 +110,4 @@ https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/
 
 ## Privacy and security
 
-OAuth access is limited to the `identify` scope. Rearrangement links expire, are bound to the Discord user who ran the command, and require a signed session cookie before badge data can be changed.
+OAuth access is limited to the `identify` scope. Rearrangement links expire, are bound to the Discord user who ran the command, and require a signed session cookie before badge data can be changed. If a different Discord account attempts to open or authorize a rearrangement link, Jadges terminates that exact link and sends the original owner a security-alert DM.
