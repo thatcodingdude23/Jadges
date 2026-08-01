@@ -1,9 +1,11 @@
 import { mkdir } from "node:fs/promises";
 import { config } from "./config.js";
 import { startDiscordBot } from "./discord.js";
+import { installRearrangeSecurity } from "./rearrangeSecurity.js";
 import { startServer } from "./server.js";
 
 await mkdir(config.imagesDir, { recursive: true });
+installRearrangeSecurity();
 const server = startServer();
 const client = await startDiscordBot();
 
