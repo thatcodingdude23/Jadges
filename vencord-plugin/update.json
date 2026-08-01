@@ -1,29 +1,3 @@
 {
-  "version": 20,
-  "files": [
-    {
-      "path": "index.tsx",
-      "sha256": "ccd7e299d5bb3bcc80820b4df1930089f9665f65aa1c1783ea4347e3d2a16389"
-    },
-    {
-      "path": "base.tsx",
-      "sha256": "216badff892e88673063efe4e8f1458adf7d4e26998fa0c69e4e18136209d7f1"
-    },
-    {
-      "path": "native.ts",
-      "sha256": "951f1f9058bc9e566c6142c252743cea47832d32d61efb003e48a8b1045e8f7d"
-    },
-    {
-      "path": "style.css",
-      "sha256": "e41b521aac93c47a55073116d09bbf5c0041c77336735c3db16aa2a1de2f3593"
-    },
-    {
-      "path": "updater.ts",
-      "sha256": "8d0515632f7e240689a44f6dc9bd93da07aa3ba08d192afea016bfcfba901f40"
-    },
-    {
-      "path": "updateNative.ts",
-      "sha256": "2d050e753ef57b517246d01c95ac344756d40d57c53f05e2aeeb573cc6168bee"
-    }
-  ]
+  "version": 21
 }
