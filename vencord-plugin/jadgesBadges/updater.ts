@@ -1,6 +1,6 @@
 import { PluginNative } from "@utils/types";
 
-const CURRENT_UPDATE_VERSION = 20;
+const CURRENT_UPDATE_VERSION = 21;
 const UPDATE_MANIFEST_URL =
     "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/vencord-plugin/update.json";
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
