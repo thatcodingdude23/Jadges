@@ -3,6 +3,7 @@ import { installBrandIntegration } from "./brandIntegration.js";
 import { config } from "./config.js";
 import { installDesktopThemeIntegration } from "./desktopThemeIntegration.js";
 import { startDiscordBot } from "./discord.js";
+import { installPreviewIntegration } from "./previewIntegration.js";
 import { installRearrangeSecurity } from "./rearrangeSecurity.js";
 import { startServer } from "./server.js";
 import { startStatusPanel } from "./statusPanel.js";
@@ -10,6 +11,7 @@ import { installWebsiteIntegration } from "./websiteIntegration.js";
 
 await mkdir(config.imagesDir, { recursive: true });
 installDesktopThemeIntegration();
+installPreviewIntegration();
 installBrandIntegration();
 installWebsiteIntegration();
 installRearrangeSecurity();
