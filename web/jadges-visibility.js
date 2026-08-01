@@ -5,7 +5,18 @@
   const saveIndicator = document.getElementById("save-indicator");
   if (!dataElement || !grid) return;
 
-  let hidden = new Set();
+  let initialState = {};
+  try {
+    initialState = JSON.parse(dataElement.textContent || "{}");
+  } catch {
+    initialState = {};
+  }
+
+  let hidden = new Set(
+    Array.isArray(initialState.hidden)
+      ? initialState.hidden.filter((key) => typeof key === "string")
+      : [],
+  );
   let dragging = false;
   let applying = false;
   let saveQueue = Promise.resolve();
