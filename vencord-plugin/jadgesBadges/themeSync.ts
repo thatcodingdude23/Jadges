@@ -1,5 +1,6 @@
 import { Settings } from "@api/Settings";
-import { UserStore } from "@webpack/common";
+import { findByCodeLazy } from "@webpack";
+import { ThemeStore, UserStore } from "@webpack/common";
 
 type ThemeMode = "dark" | "light";
 
@@ -16,20 +17,19 @@ type SettingsFeed = Record<string, { theme?: Partial<AccountTheme>; }>;
 
 const DEFAULT_API_URL = "https://jadges.onrender.com/badges.json";
 const REFRESH_INTERVAL = 5_000;
-const STYLE_ID = "jadges-account-theme-style";
-const ROOT_ATTRIBUTE = "data-jadges-account-theme";
+const THEME_MARKER = "jadges-account-theme=1";
+const LEGACY_STYLE_ID = "jadges-account-theme-style";
+const LEGACY_ROOT_ATTRIBUTE = "data-jadges-account-theme";
 const HEX_COLOR = /^#[0-9A-F]{6}$/;
+const saveDiscordTheme = findByCodeLazy(
+    'type:"UNSYNCED_USER_SETTINGS_UPDATE',
+    '"system"==='
+) as ((settings: { theme: string; }) => void);
 
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
 let lastSignature = "";
-let styleElement: HTMLStyleElement | undefined;
-let originalThemeClasses: {
-    htmlDark: boolean;
-    htmlLight: boolean;
-    bodyDark: boolean;
-    bodyLight: boolean;
-    colorScheme: string;
-} | undefined;
+let activeThemeLink: string | undefined;
+let originalDiscordTheme: string | undefined;
 
 function normalizeApiUrl(value: unknown): string {
     const url = typeof value === "string" ? value.trim() : "";
@@ -77,214 +77,71 @@ function normalizeTheme(value: unknown): AccountTheme | undefined {
     };
 }
 
-function parseRgb(hex: string): [number, number, number] {
-    return [
-        Number.parseInt(hex.slice(1, 3), 16),
-        Number.parseInt(hex.slice(3, 5), 16),
-        Number.parseInt(hex.slice(5, 7), 16)
-    ];
+function isJadgesThemeLink(value: string): boolean {
+    return value.includes(THEME_MARKER);
 }
 
-function rgbHex(red: number, green: number, blue: number): string {
-    return `#${[red, green, blue]
-        .map(value => Math.round(Math.min(255, Math.max(0, value))).toString(16).padStart(2, "0"))
-        .join("")}`.toUpperCase();
-}
+function setThemeLink(link: string | undefined): void {
+    const existing = Array.isArray(Settings.themeLinks)
+        ? Settings.themeLinks.filter(value => typeof value === "string" && !isJadgesThemeLink(value))
+        : [];
+    const next = link ? [...existing, link] : existing;
 
-function mixHex(base: string, tint: string, ratio: number): string {
-    const [baseRed, baseGreen, baseBlue] = parseRgb(base);
-    const [tintRed, tintGreen, tintBlue] = parseRgb(tint);
-    const amount = Math.min(1, Math.max(0, ratio));
-    return rgbHex(
-        baseRed + (tintRed - baseRed) * amount,
-        baseGreen + (tintGreen - baseGreen) * amount,
-        baseBlue + (tintBlue - baseBlue) * amount
-    );
-}
-
-function rgba(hex: string, alpha: number): string {
-    const [red, green, blue] = parseRgb(hex);
-    return `rgba(${red}, ${green}, ${blue}, ${Math.min(1, Math.max(0, alpha)).toFixed(3)})`;
-}
-
-function gradient(theme: AccountTheme): string {
-    const alpha = Math.max(0.04, theme.intensity / 100 * 0.46);
-    const stops = theme.colors.map((color, index) => {
-        const position = theme.colors.length === 1
-            ? 50
-            : Math.round(index * 100 / (theme.colors.length - 1));
-        return `${rgba(color, alpha)} ${position}%`;
-    });
-    return `linear-gradient(${theme.angle}deg, ${stops.join(", ")})`;
-}
-
-function buildCss(theme: AccountTheme): string {
-    const primary = theme.colors[0]!;
-    const secondary = theme.colors[1] || primary;
-    const tertiary = theme.colors[2] || secondary;
-    const strength = theme.intensity / 100;
-    const light = theme.mode === "light";
-
-    const backgroundPrimary = mixHex(light ? "#FFFFFF" : "#111214", primary, strength * (light ? 0.12 : 0.24));
-    const backgroundSecondary = mixHex(light ? "#F2F3F5" : "#1A1B1E", secondary, strength * (light ? 0.10 : 0.19));
-    const backgroundTertiary = mixHex(light ? "#E3E5E8" : "#0B0C0E", tertiary, strength * (light ? 0.11 : 0.20));
-    const backgroundFloating = mixHex(backgroundTertiary, primary, light ? 0.07 : 0.12);
-    const backgroundAccent = mixHex(backgroundSecondary, primary, light ? 0.18 : 0.30);
-    const modifierHover = mixHex(backgroundSecondary, primary, light ? 0.13 : 0.22);
-    const modifierActive = mixHex(backgroundSecondary, primary, light ? 0.20 : 0.30);
-    const modifierSelected = mixHex(backgroundSecondary, primary, light ? 0.25 : 0.38);
-    const textNormal = light ? "#252830" : "#E8EAF0";
-    const textMuted = light ? "#626A78" : "#9BA3B0";
-    const headerPrimary = light ? "#17191F" : "#F4F5F7";
-    const headerSecondary = light ? "#4E5663" : "#C5CAD3";
-    const appGradient = gradient(theme);
-
-    return `
-html[${ROOT_ATTRIBUTE}="active"] {
-    color-scheme: ${theme.mode} !important;
-    --brand-experiment: ${primary} !important;
-    --brand-experiment-100: ${mixHex("#FFFFFF", primary, 0.12)} !important;
-    --brand-experiment-200: ${mixHex("#FFFFFF", primary, 0.28)} !important;
-    --brand-experiment-300: ${mixHex("#FFFFFF", primary, 0.46)} !important;
-    --brand-experiment-400: ${mixHex("#FFFFFF", primary, 0.68)} !important;
-    --brand-experiment-500: ${primary} !important;
-    --brand-experiment-560: ${mixHex(primary, "#000000", 0.14)} !important;
-    --brand-experiment-600: ${mixHex(primary, "#000000", 0.24)} !important;
-    --brand-260: ${secondary} !important;
-    --brand-360: ${primary} !important;
-    --brand-500: ${primary} !important;
-    --brand-560: ${mixHex(primary, "#000000", 0.14)} !important;
-    --text-normal: ${textNormal} !important;
-    --text-muted: ${textMuted} !important;
-    --text-link: ${primary} !important;
-    --header-primary: ${headerPrimary} !important;
-    --header-secondary: ${headerSecondary} !important;
-    --interactive-normal: ${primary} !important;
-    --interactive-hover: ${secondary} !important;
-    --interactive-active: ${headerPrimary} !important;
-    --interactive-muted: ${textMuted} !important;
-    --channels-default: ${textMuted} !important;
-    --channel-icon: ${primary} !important;
-    --background-primary: ${backgroundPrimary} !important;
-    --background-secondary: ${backgroundSecondary} !important;
-    --background-secondary-alt: ${backgroundSecondary} !important;
-    --background-tertiary: ${backgroundTertiary} !important;
-    --background-floating: ${backgroundFloating} !important;
-    --background-nested-floating: ${backgroundFloating} !important;
-    --background-accent: ${backgroundAccent} !important;
-    --background-mobile-primary: ${backgroundPrimary} !important;
-    --background-mobile-secondary: ${backgroundSecondary} !important;
-    --background-modifier-hover: ${modifierHover} !important;
-    --background-modifier-active: ${modifierActive} !important;
-    --background-modifier-selected: ${modifierSelected} !important;
-    --background-modifier-accent: ${backgroundAccent} !important;
-    --background-message-hover: ${modifierHover} !important;
-    --background-mentioned: ${rgba(primary, 0.13)} !important;
-    --bg-base-primary: ${backgroundPrimary} !important;
-    --bg-base-secondary: ${backgroundSecondary} !important;
-    --bg-base-tertiary: ${backgroundTertiary} !important;
-    --bg-surface-overlay: ${backgroundFloating} !important;
-    --bg-surface-raised: ${backgroundSecondary} !important;
-    --background-base-low: ${backgroundPrimary} !important;
-    --background-base-lower: ${backgroundSecondary} !important;
-    --background-base-lowest: ${backgroundTertiary} !important;
-    --background-surface-high: ${backgroundAccent} !important;
-    --background-surface-higher: ${modifierSelected} !important;
-    --chat-background: ${backgroundPrimary} !important;
-    --chat-input-container-background: ${backgroundAccent} !important;
-    --input-background: ${backgroundAccent} !important;
-    --modal-background: ${backgroundSecondary} !important;
-    --modal-footer-background: ${backgroundTertiary} !important;
-    --card-primary-bg: ${backgroundPrimary} !important;
-    --card-secondary-bg: ${backgroundSecondary} !important;
-    --jadges-account-gradient: ${appGradient};
-}
-
-html[${ROOT_ATTRIBUTE}="active"] body,
-html[${ROOT_ATTRIBUTE}="active"] #app-mount,
-html[${ROOT_ATTRIBUTE}="active"] [class*="appMount"] {
-    background: var(--jadges-account-gradient), ${backgroundPrimary} !important;
-}
-
-html[${ROOT_ATTRIBUTE}="active"] [class*="appAsidePanelWrapper"],
-html[${ROOT_ATTRIBUTE}="active"] [class*="layers"],
-html[${ROOT_ATTRIBUTE}="active"] [class*="baseLayer"] {
-    background: transparent !important;
-}
-
-html[${ROOT_ATTRIBUTE}="active"] [class*="guilds"],
-html[${ROOT_ATTRIBUTE}="active"] [class*="sidebar"],
-html[${ROOT_ATTRIBUTE}="active"] [class*="panels"],
-html[${ROOT_ATTRIBUTE}="active"] [class*="membersWrap"] {
-    background-color: color-mix(in srgb, ${backgroundTertiary} 91%, transparent) !important;
-}
-
-html[${ROOT_ATTRIBUTE}="active"] [class*="chatContent"],
-html[${ROOT_ATTRIBUTE}="active"] [class*="contentRegion"],
-html[${ROOT_ATTRIBUTE}="active"] [class*="standardSidebarView"] {
-    background-color: color-mix(in srgb, ${backgroundPrimary} 88%, transparent) !important;
-}
-
-html[${ROOT_ATTRIBUTE}="active"] [class*="channelTextArea"],
-html[${ROOT_ATTRIBUTE}="active"] [class*="searchBar"],
-html[${ROOT_ATTRIBUTE}="active"] [class*="input"] {
-    background-color: color-mix(in srgb, ${backgroundAccent} 92%, transparent) !important;
-}
-`;
-}
-
-function captureOriginalTheme(): void {
-    if (originalThemeClasses) return;
-    originalThemeClasses = {
-        htmlDark: document.documentElement.classList.contains("theme-dark"),
-        htmlLight: document.documentElement.classList.contains("theme-light"),
-        bodyDark: document.body?.classList.contains("theme-dark") ?? false,
-        bodyLight: document.body?.classList.contains("theme-light") ?? false,
-        colorScheme: document.documentElement.style.colorScheme
-    };
-}
-
-function setThemeMode(mode: ThemeMode): void {
-    captureOriginalTheme();
-    const targets = [document.documentElement, document.body].filter(Boolean) as HTMLElement[];
-    for (const target of targets) {
-        target.classList.toggle("theme-dark", mode === "dark");
-        target.classList.toggle("theme-light", mode === "light");
+    if (JSON.stringify(Settings.themeLinks) !== JSON.stringify(next)) {
+        Settings.themeLinks = next;
     }
-    document.documentElement.style.colorScheme = mode;
+    activeThemeLink = link;
 }
 
-function applyTheme(theme: AccountTheme): void {
+function buildThemeLink(userId: string, theme: AccountTheme): string {
+    const version = encodeURIComponent(theme.updatedAt || JSON.stringify(theme));
+    return `${apiRoot()}/themes/${encodeURIComponent(userId)}.css?${THEME_MARKER}&v=${version}`;
+}
+
+function setDiscordTheme(mode: ThemeMode): void {
+    if (!originalDiscordTheme) originalDiscordTheme = ThemeStore.theme;
+    if (ThemeStore.theme === mode) return;
+
+    try {
+        saveDiscordTheme({ theme: mode });
+    } catch (error) {
+        console.warn("[JadgesBadges] Could not switch Discord's theme mode:", error);
+    }
+}
+
+function restoreDiscordTheme(): void {
+    if (!originalDiscordTheme) return;
+    const previous = originalDiscordTheme;
+    originalDiscordTheme = undefined;
+    if (ThemeStore.theme === previous) return;
+
+    try {
+        saveDiscordTheme({ theme: previous });
+    } catch (error) {
+        console.warn("[JadgesBadges] Could not restore Discord's previous theme mode:", error);
+    }
+}
+
+function removeLegacyThemeInjection(): void {
+    document.getElementById(LEGACY_STYLE_ID)?.remove();
+    document.documentElement.removeAttribute(LEGACY_ROOT_ATTRIBUTE);
+}
+
+function applyTheme(userId: string, theme: AccountTheme): void {
     const signature = JSON.stringify(theme);
-    setThemeMode(theme.mode);
-    document.documentElement.setAttribute(ROOT_ATTRIBUTE, "active");
+    const link = buildThemeLink(userId, theme);
+    setDiscordTheme(theme.mode);
 
-    if (!styleElement) {
-        styleElement = document.createElement("style");
-        styleElement.id = STYLE_ID;
-        document.head.append(styleElement);
-    }
-
-    if (signature === lastSignature) return;
+    if (signature === lastSignature && activeThemeLink === link) return;
     lastSignature = signature;
-    styleElement.textContent = buildCss(theme);
+    setThemeLink(link);
 }
 
-function restoreOriginalTheme(): void {
-    document.documentElement.removeAttribute(ROOT_ATTRIBUTE);
-    styleElement?.remove();
-    styleElement = undefined;
+function removeTheme(): void {
     lastSignature = "";
-
-    if (!originalThemeClasses) return;
-    document.documentElement.classList.toggle("theme-dark", originalThemeClasses.htmlDark);
-    document.documentElement.classList.toggle("theme-light", originalThemeClasses.htmlLight);
-    if (document.body) {
-        document.body.classList.toggle("theme-dark", originalThemeClasses.bodyDark);
-        document.body.classList.toggle("theme-light", originalThemeClasses.bodyLight);
-    }
-    document.documentElement.style.colorScheme = originalThemeClasses.colorScheme;
-    originalThemeClasses = undefined;
+    setThemeLink(undefined);
+    restoreDiscordTheme();
+    removeLegacyThemeInjection();
 }
 
 async function refreshTheme(): Promise<void> {
@@ -304,8 +161,8 @@ async function refreshTheme(): Promise<void> {
         }
 
         const theme = normalizeTheme((data as SettingsFeed)[userId]?.theme);
-        if (theme) applyTheme(theme);
-        else restoreOriginalTheme();
+        if (theme) applyTheme(userId, theme);
+        else removeTheme();
     } catch (error) {
         console.error("[JadgesBadges] Failed to synchronize the account theme:", error);
     }
@@ -313,6 +170,7 @@ async function refreshTheme(): Promise<void> {
 
 export function startThemeSync(): void {
     clearInterval(refreshTimer);
+    removeLegacyThemeInjection();
     void refreshTheme();
     refreshTimer = setInterval(() => void refreshTheme(), REFRESH_INTERVAL);
 }
@@ -320,5 +178,5 @@ export function startThemeSync(): void {
 export function stopThemeSync(): void {
     clearInterval(refreshTimer);
     refreshTimer = undefined;
-    restoreOriginalTheme();
+    removeTheme();
 }
