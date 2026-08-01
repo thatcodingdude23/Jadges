@@ -1,8 +1,8 @@
-/* Allow Jadges API requests and remote badge artwork without a host-permission popup. */
+/* Allow Jadges API requests, remote theme CSS, and badge artwork without a host-permission popup. */
 
-import { CspPolicies, ImageSrc } from "@main/csp";
+import { CspPolicies, ImageAndCssSrc, ImageSrc } from "@main/csp";
 
-CspPolicies["jadges.onrender.com"] = ImageSrc;
+CspPolicies["jadges.onrender.com"] = ImageAndCssSrc;
 CspPolicies["cdn.discordapp.com"] = ImageSrc;
 CspPolicies["media.discordapp.net"] = ImageSrc;
 CspPolicies["discord.fandom.com"] = ImageSrc;
