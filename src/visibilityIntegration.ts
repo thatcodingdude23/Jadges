@@ -6,7 +6,7 @@ import http, {
 } from "node:http";
 import { config } from "./config.js";
 import { getOrCreateUser, mutateStore, readStore } from "./store.js";
-import type { UserRecord } from "./types.js";
+import type { NitroPreset, UserRecord } from "./types.js";
 
 const SESSION_COOKIE = "jadges_session";
 const MAX_BODY_SIZE = 32 * 1024;
@@ -84,8 +84,42 @@ function normalizeHidden(value: unknown): string[] {
   )].slice(0, MAX_HIDDEN_BADGES);
 }
 
-function hiddenForUser(user: UserRecord | undefined): string[] {
+function storedHiddenForUser(user: UserRecord | undefined): string[] {
   return normalizeHidden((user as VisibilityUser | undefined)?.hiddenBadgeKeys);
+}
+
+function legacyNitroPreset(user: UserRecord): NitroPreset | undefined {
+  let selected: UserRecord["badges"][number] | undefined;
+
+  for (const badge of user.badges || []) {
+    if (badge.pending || !badge.nitroPreset) continue;
+    const selectedTime = Date.parse(selected?.approvedAt || selected?.createdAt || "");
+    const badgeTime = Date.parse(badge.approvedAt || badge.createdAt || "");
+    if (!selected || !Number.isFinite(selectedTime) || badgeTime >= selectedTime) {
+      selected = badge;
+    }
+  }
+
+  return selected?.nitroPreset;
+}
+
+function automaticHiddenForUser(user: UserRecord | undefined): string[] {
+  if (!user) return [];
+  const preset = user.nitro && !user.nitro.pending
+    ? user.nitro.preset
+    : legacyNitroPreset(user);
+  if (!preset) return [];
+
+  const hidden = ["discord:nitro"];
+  if (preset === "remove") hidden.push("discord:boosting");
+  return hidden;
+}
+
+function hiddenForUser(user: UserRecord | undefined): string[] {
+  return [...new Set([
+    ...storedHiddenForUser(user),
+    ...automaticHiddenForUser(user),
+  ])].slice(0, MAX_HIDDEN_BADGES);
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {
@@ -134,6 +168,7 @@ async function handlePrivateVisibility(
     const data = await readStore();
     sendJson(request, response, 200, {
       hidden: hiddenForUser(data.users[userId]),
+      detected: automaticHiddenForUser(data.users[userId]),
     });
     return;
   }
@@ -150,10 +185,12 @@ async function handlePrivateVisibility(
       keys?: unknown;
     };
 
-    let saved: string[] = [];
+    let responseHidden: string[] = [];
+    let detected: string[] = [];
     await mutateStore((data) => {
       const user = getOrCreateUser(data, userId) as VisibilityUser;
-      const current = new Set(hiddenForUser(user));
+      const current = new Set(storedHiddenForUser(user));
+      let saved: string[];
 
       if (body.keys !== undefined) {
         saved = normalizeHidden(body.keys);
@@ -172,9 +209,16 @@ async function handlePrivateVisibility(
 
       if (saved.length > 0) user.hiddenBadgeKeys = saved;
       else delete user.hiddenBadgeKeys;
+
+      detected = automaticHiddenForUser(user);
+      responseHidden = [...new Set([...saved, ...detected])]
+        .slice(0, MAX_HIDDEN_BADGES);
     });
 
-    sendJson(request, response, 200, { hidden: saved });
+    sendJson(request, response, 200, {
+      hidden: responseHidden,
+      detected,
+    });
   } catch (error) {
     sendJson(request, response, 400, {
       error: error instanceof Error ? error.message : "Invalid visibility settings",
