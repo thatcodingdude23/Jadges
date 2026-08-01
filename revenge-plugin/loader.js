@@ -3,7 +3,8 @@
 
   const SOURCES = [
     "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/index.js",
-    "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/theme.js"
+    "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/theme.js",
+    "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/visibility.js"
   ];
 
   const loadedPlugins = [];
