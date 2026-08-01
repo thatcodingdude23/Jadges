@@ -139,14 +139,18 @@ async function fetchManifest(): Promise<UpdateManifest> {
     return manifest;
 }
 
-async function runBuild(vencordRoot: string): Promise<void> {
+async function runVencordScript(
+    vencordRoot: string,
+    script: "build" | "inject",
+    timeout: number
+): Promise<void> {
     const command = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 
     try {
-        await execFileAsync(command, ["build"], {
+        await execFileAsync(command, [script], {
             cwd: vencordRoot,
             windowsHide: true,
-            timeout: 5 * 60 * 1000,
+            timeout,
             maxBuffer: 16 * 1024 * 1024
         });
     } catch (error) {
@@ -158,8 +162,13 @@ async function runBuild(vencordRoot: string): Promise<void> {
         const output = String(details.stderr || details.stdout || details.message || error)
             .trim()
             .slice(-1500);
-        throw new Error(output || "pnpm build failed");
+        throw new Error(output || `pnpm ${script} failed`);
     }
+}
+
+async function buildAndInject(vencordRoot: string): Promise<void> {
+    await runVencordScript(vencordRoot, "build", 5 * 60 * 1000);
+    await runVencordScript(vencordRoot, "inject", 5 * 60 * 1000);
 }
 
 export async function installLatestUpdate(
@@ -207,7 +216,7 @@ export async function installLatestUpdate(
         await rename(stagingDir, pluginDir);
         newPluginInstalled = true;
 
-        await runBuild(vencordRoot);
+        await buildAndInject(vencordRoot);
 
         if (oldPluginMoved) {
             await rm(backupDir, { recursive: true, force: true });
@@ -216,9 +225,14 @@ export async function installLatestUpdate(
         return {
             ok: true,
             version: manifest.version,
-            message: "Jadges was updated successfully."
+            message: "Jadges was updated, rebuilt, and injected successfully."
         };
     } catch (error) {
+        const updateError = error instanceof Error
+            ? error.message
+            : "The update failed.";
+        let recoveryError: string | undefined;
+
         try {
             if (newPluginInstalled) {
                 await rm(pluginDir, { recursive: true, force: true });
@@ -229,16 +243,20 @@ export async function installLatestUpdate(
             if (await exists(stagingDir)) {
                 await rm(stagingDir, { recursive: true, force: true });
             }
+
+            await buildAndInject(vencordRoot);
         } catch (rollbackError) {
             console.error("[JadgesBadges] Update rollback failed:", rollbackError);
+            recoveryError = rollbackError instanceof Error
+                ? rollbackError.message
+                : "The previous Vencord build could not be restored.";
         }
 
         return {
             ok: false,
-            message:
-                error instanceof Error
-                    ? `The update was rolled back: ${error.message}`
-                    : "The update failed and was rolled back."
+            message: recoveryError
+                ? `The update failed: ${updateError}. Automatic recovery also failed: ${recoveryError}`
+                : `The update was rolled back: ${updateError}`
         };
     }
 }
