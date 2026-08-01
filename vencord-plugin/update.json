@@ -19,7 +19,7 @@
     },
     {
       "path": "updater.ts",
-      "sha256": "e407ac2a174433a9c01fe8cb738212c5ba3ddba91b242213937e5861f6c3dc37"
+      "sha256": "d7bbe00b37f8ea101051d4c29c2c34ca2fca98af239babf27e13753c4c2077e0"
     },
     {
       "path": "updateNative.ts",
