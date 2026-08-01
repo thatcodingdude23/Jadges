@@ -1,4 +1,5 @@
 import { mkdir } from "node:fs/promises";
+import { installBrandIntegration } from "./brandIntegration.js";
 import { config } from "./config.js";
 import { startDiscordBot } from "./discord.js";
 import { installRearrangeSecurity } from "./rearrangeSecurity.js";
@@ -7,6 +8,7 @@ import { startStatusPanel } from "./statusPanel.js";
 import { installWebsiteIntegration } from "./websiteIntegration.js";
 
 await mkdir(config.imagesDir, { recursive: true });
+installBrandIntegration();
 installWebsiteIntegration();
 installRearrangeSecurity();
 const server = startServer();
