@@ -8,13 +8,12 @@ import { promisify } from "node:util";
 import { IpcMainInvokeEvent } from "electron";
 
 const execFileAsync = promisify(execFile);
-
 const UPDATE_MANIFEST_URL =
     "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/vencord-plugin/update.json";
 const RAW_PLUGIN_ROOT =
     "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/vencord-plugin/jadgesBadges/";
 const PLUGIN_FOLDER_NAME = "jadgesBadges";
-const ALLOWED_UPDATE_FILES = new Set([
+const ALLOWED_FILES = new Set([
     "index.tsx",
     "base.tsx",
     "native.ts",
@@ -49,10 +48,8 @@ async function exists(target: string): Promise<boolean> {
 }
 
 async function isVencordRoot(candidate: string): Promise<boolean> {
-    return (
-        await exists(path.join(candidate, "package.json"))
-        && await exists(path.join(candidate, "src", "userplugins"))
-    );
+    return await exists(path.join(candidate, "package.json"))
+        && await exists(path.join(candidate, "src", "userplugins"));
 }
 
 function parentCandidates(start: string): string[] {
@@ -62,11 +59,9 @@ function parentCandidates(start: string): string[] {
     while (true) {
         result.push(current);
         const parent = path.dirname(current);
-        if (parent === current) break;
+        if (parent === current) return result;
         current = parent;
     }
-
-    return result;
 }
 
 async function findVencordRoot(): Promise<string | undefined> {
@@ -79,86 +74,71 @@ async function findVencordRoot(): Promise<string | undefined> {
         path.join(home, "vencord"),
         path.join(home, "Desktop", "Vencord"),
         path.join(home, "Documents", "Vencord"),
-        path.join(home, "Downloads", "Vencord"),
-        path.join(home, "source", "Vencord"),
-        path.join(home, "dev", "Vencord")
+        path.join(home, "Downloads", "Vencord")
     ]);
 
     for (const candidate of candidates) {
         if (await isVencordRoot(candidate)) return path.resolve(candidate);
     }
-
     return undefined;
 }
 
-function sha256(value: string): string {
-    return createHash("sha256").update(value, "utf8").digest("hex");
+function sha256(content: string): string {
+    return createHash("sha256").update(content, "utf8").digest("hex");
 }
 
 async function fetchText(url: string): Promise<string> {
-    const response = await fetch(`${url}${url.includes("?") ? "&" : "?"}t=${Date.now()}`, {
+    const separator = url.includes("?") ? "&" : "?";
+    const response = await fetch(`${url}${separator}t=${Date.now()}`, {
         cache: "no-store",
         signal: AbortSignal.timeout(30_000)
     });
-
-    if (!response.ok) {
-        throw new Error(`Download returned HTTP ${response.status}`);
-    }
-
+    if (!response.ok) throw new Error(`Download returned HTTP ${response.status}`);
     return response.text();
 }
 
 async function fetchManifest(): Promise<UpdateManifest> {
-    const text = await fetchText(UPDATE_MANIFEST_URL);
-    const manifest = JSON.parse(text) as UpdateManifest;
+    const manifest = JSON.parse(await fetchText(UPDATE_MANIFEST_URL)) as UpdateManifest;
 
     if (
         !Number.isSafeInteger(manifest.version)
         || !Array.isArray(manifest.files)
-        || manifest.files.length === 0
+        || manifest.files.length !== ALLOWED_FILES.size
     ) {
-        throw new Error("The update manifest is invalid");
+        throw new Error("The update manifest is invalid.");
     }
 
+    const paths = new Set<string>();
     for (const file of manifest.files) {
         if (
             !file
-            || typeof file.path !== "string"
-            || !ALLOWED_UPDATE_FILES.has(file.path)
-            || typeof file.sha256 !== "string"
+            || !ALLOWED_FILES.has(file.path)
+            || paths.has(file.path)
             || !/^[a-f0-9]{64}$/i.test(file.sha256)
         ) {
-            throw new Error("The update manifest contains an invalid file");
+            throw new Error("The update manifest contains an invalid file.");
         }
-    }
-
-    if (new Set(manifest.files.map(file => file.path)).size !== manifest.files.length) {
-        throw new Error("The update manifest contains duplicate files");
+        paths.add(file.path);
     }
 
     return manifest;
 }
 
-async function runVencordScript(
-    vencordRoot: string,
-    script: "build" | "inject",
-    timeout: number
+async function runPnpm(
+    root: string,
+    script: "build" | "inject"
 ): Promise<void> {
     const command = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 
     try {
         await execFileAsync(command, [script], {
-            cwd: vencordRoot,
+            cwd: root,
             windowsHide: true,
-            timeout,
+            timeout: 5 * 60 * 1000,
             maxBuffer: 16 * 1024 * 1024
         });
     } catch (error) {
-        const details = error as {
-            stderr?: string;
-            stdout?: string;
-            message?: string;
-        };
+        const details = error as { stderr?: string; stdout?: string; message?: string };
         const output = String(details.stderr || details.stdout || details.message || error)
             .trim()
             .slice(-1500);
@@ -166,97 +146,78 @@ async function runVencordScript(
     }
 }
 
-async function buildAndInject(vencordRoot: string): Promise<void> {
-    await runVencordScript(vencordRoot, "build", 5 * 60 * 1000);
-    await runVencordScript(vencordRoot, "inject", 5 * 60 * 1000);
+async function buildAndInject(root: string): Promise<void> {
+    await runPnpm(root, "build");
+    await runPnpm(root, "inject");
 }
 
 export async function installLatestUpdate(
     _: IpcMainInvokeEvent
 ): Promise<JadgesUpdateResult> {
-    const vencordRoot = await findVencordRoot();
-
-    if (!vencordRoot) {
+    const root = await findVencordRoot();
+    if (!root) {
         return {
             ok: false,
-            message:
-                "I could not find your Vencord source folder. Put it in your user folder as Vencord, or set the VENCORD_ROOT environment variable."
+            message: "Vencord source was not found. Put it in your user folder as Vencord, or set VENCORD_ROOT."
         };
     }
 
-    const userpluginsDir = path.join(vencordRoot, "src", "userplugins");
-    const pluginDir = path.join(userpluginsDir, PLUGIN_FOLDER_NAME);
+    const userplugins = path.join(root, "src", "userplugins");
+    const plugin = path.join(userplugins, PLUGIN_FOLDER_NAME);
     const suffix = `${Date.now()}-${randomUUID()}`;
-    const stagingDir = path.join(userpluginsDir, `.${PLUGIN_FOLDER_NAME}-update-${suffix}`);
-    const backupDir = path.join(userpluginsDir, `.${PLUGIN_FOLDER_NAME}-backup-${suffix}`);
-
-    let oldPluginMoved = false;
-    let newPluginInstalled = false;
+    const staging = path.join(userplugins, `.${PLUGIN_FOLDER_NAME}-update-${suffix}`);
+    const backup = path.join(userplugins, `.${PLUGIN_FOLDER_NAME}-backup-${suffix}`);
+    let movedOld = false;
+    let installedNew = false;
 
     try {
         const manifest = await fetchManifest();
-        await mkdir(stagingDir, { recursive: false });
+        await mkdir(staging);
 
         for (const file of manifest.files) {
             const content = await fetchText(`${RAW_PLUGIN_ROOT}${file.path}`);
-            const actualHash = sha256(content);
-
-            if (actualHash !== file.sha256.toLowerCase()) {
+            if (sha256(content) !== file.sha256.toLowerCase()) {
                 throw new Error(`Hash check failed for ${file.path}`);
             }
-
-            await writeFile(path.join(stagingDir, file.path), content, "utf8");
+            await writeFile(path.join(staging, file.path), content, "utf8");
         }
 
-        if (await exists(pluginDir)) {
-            await rename(pluginDir, backupDir);
-            oldPluginMoved = true;
+        if (await exists(plugin)) {
+            await rename(plugin, backup);
+            movedOld = true;
         }
 
-        await rename(stagingDir, pluginDir);
-        newPluginInstalled = true;
+        await rename(staging, plugin);
+        installedNew = true;
+        await buildAndInject(root);
 
-        await buildAndInject(vencordRoot);
-
-        if (oldPluginMoved) {
-            await rm(backupDir, { recursive: true, force: true });
-        }
-
+        if (movedOld) await rm(backup, { recursive: true, force: true });
         return {
             ok: true,
             version: manifest.version,
             message: "Jadges was updated, rebuilt, and injected successfully."
         };
     } catch (error) {
-        const updateError = error instanceof Error
-            ? error.message
-            : "The update failed.";
-        let recoveryError: string | undefined;
+        const reason = error instanceof Error ? error.message : "The update failed.";
 
         try {
-            if (newPluginInstalled) {
-                await rm(pluginDir, { recursive: true, force: true });
-            }
-            if (oldPluginMoved && await exists(backupDir)) {
-                await rename(backupDir, pluginDir);
-            }
-            if (await exists(stagingDir)) {
-                await rm(stagingDir, { recursive: true, force: true });
-            }
-
-            await buildAndInject(vencordRoot);
+            if (installedNew) await rm(plugin, { recursive: true, force: true });
+            if (movedOld && await exists(backup)) await rename(backup, plugin);
+            if (await exists(staging)) await rm(staging, { recursive: true, force: true });
+            if (movedOld) await buildAndInject(root);
         } catch (rollbackError) {
-            console.error("[JadgesBadges] Update rollback failed:", rollbackError);
-            recoveryError = rollbackError instanceof Error
+            const recovery = rollbackError instanceof Error
                 ? rollbackError.message
-                : "The previous Vencord build could not be restored.";
+                : "Automatic recovery failed.";
+            return {
+                ok: false,
+                message: `Update failed: ${reason}. Recovery failed: ${recovery}`
+            };
         }
 
         return {
             ok: false,
-            message: recoveryError
-                ? `The update failed: ${updateError}. Automatic recovery also failed: ${recoveryError}`
-                : `The update was rolled back: ${updateError}`
+            message: `The update was rolled back: ${reason}`
         };
     }
 }
