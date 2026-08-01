@@ -4,6 +4,7 @@ import { findStoreLazy } from "@webpack";
 interface UserProfileLike {
     userId?: string;
     fetchEndedAt?: number;
+    badges?: Array<{ icon?: string; }>;
 }
 
 interface UserProfileStoreLike {
@@ -74,14 +75,34 @@ function nativeKey(values: string[]): string | undefined {
     return normalized ? `discord:${normalized}` : undefined;
 }
 
+function imageIdentity(value: string | undefined): string {
+    if (!value) return "";
+    const hash = value.match(/(?:badge-icons|assets\/content)\/([a-z0-9_-]{8,})/i)?.[1];
+    return hash?.toLowerCase() || value.split("?")[0]!.toLowerCase();
+}
+
 function currentProfileUserId(): string | undefined {
     try {
+        const rendered = new Set(
+            [...document.querySelectorAll<HTMLImageElement>('img[class*="badge"]')]
+                .map(image => imageIdentity(image.currentSrc || image.src))
+                .filter(Boolean)
+        );
+
         const profiles = Object.values(UserProfileStore.takeSnapshot() || {})
             .filter(profile => typeof profile?.userId === "string")
+            .map(profile => ({
+                profile,
+                score: (profile.badges || []).reduce((total, badge) =>
+                    total + (rendered.has(imageIdentity(badge.icon)) ? 1 : 0), 0
+                )
+            }))
             .sort((left, right) =>
-                Number(right.fetchEndedAt || 0) - Number(left.fetchEndedAt || 0)
+                right.score - left.score
+                || Number(right.profile.fetchEndedAt || 0) - Number(left.profile.fetchEndedAt || 0)
             );
-        return profiles[0]?.userId;
+
+        return profiles[0]?.profile.userId;
     } catch {
         return undefined;
     }
