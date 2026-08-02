@@ -1,6 +1,6 @@
 {
   "name": "Jadges Badges for Kettu",
-  "description": "Displays and rearranges Jadges badges, synchronizes account appearance, and authorizes secure profile reporting automatically in Kettu.",
+  "description": "Displays and rearranges Jadges badges and synchronizes the user's saved Jadges account appearance in Kettu.",
   "authors": [
     {
       "name": "Jaycord",
@@ -11,5 +11,5 @@
   "vendetta": {
     "icon": "ic_badge_staff"
   },
-  "hash": "3493b52e4ef53aab1229a4f9d1165f707ea388b50ef1c683df79c3e29ee650fa"
+  "hash": "a0f5c3d188e7a917c93e63f517b8a14b85aa6d627176750a54e8abf0f09eac31"
 }
