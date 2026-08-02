@@ -25,6 +25,8 @@ const FOOTER_PREFIX = "Jadges • Most Badges Leaderboard";
 const FIRST_PLACE_EMOJI = "<:oeuir:1533350484914733196>";
 const SECOND_PLACE_EMOJI = "<:twosee:1533350525226057929>";
 const THIRD_PLACE_EMOJI = "<:oksatjstes:1533350568914059364>";
+const FEATURED_COLLECTOR_EMOJI = "<:pinkaiza:1533375920839200868>";
+const FEATURED_COLLECTOR_NAMES = new Set(["onejayden", "jn.vfx", "3a0x"]);
 const BUTTON_PREFIX = "jadges-leaderboard";
 
 interface LeaderboardEntry {
@@ -110,6 +112,15 @@ function rankMarker(rank: number): string {
   return `**#${rank}**`;
 }
 
+function featuredCollectorMarker(name: ResolvedName): string {
+  const names = [name.username, name.displayName].map((value) =>
+    value.trim().toLowerCase().replace(/^@/, "")
+  );
+  return names.some((value) => FEATURED_COLLECTOR_NAMES.has(value))
+    ? `${FEATURED_COLLECTOR_EMOJI} `
+    : "";
+}
+
 function navigationRow(page: number): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
@@ -152,9 +163,10 @@ async function buildPage(
     const username = escapeMarkdown(name.username);
     const displayName = escapeMarkdown(name.displayName);
     const badgeWord = entry.badgeCount === 1 ? "badge" : "badges";
+    const collectorMarker = featuredCollectorMarker(name);
 
     return [
-      `${rankMarker(rank)} **@${username}**  •  ${displayName}`,
+      `${rankMarker(rank)} ${collectorMarker}**@${username}**  •  ${displayName}`,
       `> ✦ **${entry.badgeCount.toLocaleString()} ${badgeWord}**`,
     ].join("\n");
   });
