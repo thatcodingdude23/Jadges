@@ -1,6 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
-import { mutateStore, readStore } from "./store.js";
+import { getOrCreateUser, mutateStore, readStore } from "./store.js";
 import type { UserRecord } from "./types.js";
 
 const CLIENT_TOKEN_PREFIX = "jdg_";
@@ -65,8 +65,7 @@ export async function issueClientToken(
   const hash = tokenHash(token);
 
   await mutateStore((data) => {
-    const user = data.users[userId] as ClientAuthorizedUser | undefined;
-    if (!user) throw new Error("Jadges account not found");
+    const user = getOrCreateUser(data, userId) as ClientAuthorizedUser;
     user.clientReportTokenHash = hash;
     user.clientReportTokenCreatedAt = createdAt;
     user.clientReportTokenExpiresAt = expiresAt;
