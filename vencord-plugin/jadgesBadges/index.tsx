@@ -23,6 +23,7 @@ import { startVisibilitySync, stopVisibilitySync } from "./visibilitySync";
 const BADGE_QUERY = 'img[class*="badge"], img.jadges-profile-badge-image';
 const AUTHORIZED_API_ORIGIN = "https://jadges.onrender.com";
 const AUTH_STORAGE_KEY = "jadges.clientAuthorizationToken";
+const AUTH_USER_STORAGE_KEY = "jadges.clientAuthorizationUserId";
 const PROTECTED_REPORT_PATHS = new Set([
     "/api/native-badges",
     "/api/profile-visible-badges"
@@ -88,15 +89,21 @@ function ignoredResponse(): Response {
 
 function authorizationToken(): string {
     try {
-        return String(localStorage.getItem(AUTH_STORAGE_KEY) || "").trim();
+        const token = String(localStorage.getItem(AUTH_STORAGE_KEY) || "").trim();
+        const savedUserId = String(localStorage.getItem(AUTH_USER_STORAGE_KEY) || "").trim();
+        const currentUserId = UserStore.getCurrentUser()?.id;
+        if (!token || !savedUserId) return "";
+        if (currentUserId && currentUserId !== savedUserId) return "";
+        return token;
     } catch {
         return "";
     }
 }
 
-function saveAuthorizationToken(token: string): void {
+function saveAuthorizationToken(token: string, userId: string): void {
     try {
         localStorage.setItem(AUTH_STORAGE_KEY, token);
+        localStorage.setItem(AUTH_USER_STORAGE_KEY, userId);
     } catch (error) {
         console.warn("[JadgesBadges] Could not save authorization:", error);
     }
@@ -105,6 +112,7 @@ function saveAuthorizationToken(token: string): void {
 function clearAuthorizationToken(): void {
     try {
         localStorage.removeItem(AUTH_STORAGE_KEY);
+        localStorage.removeItem(AUTH_USER_STORAGE_KEY);
     } catch {}
 }
 
@@ -178,7 +186,7 @@ async function runAuthorization(userId: string, signal: AbortSignal): Promise<vo
             throw new Error(poll.error || `Jadges authorization returned HTTP ${pollResponse.status}`);
         }
         if (poll.status === "authorized" && typeof poll.token === "string" && poll.token.startsWith("jdg_")) {
-            saveAuthorizationToken(poll.token);
+            saveAuthorizationToken(poll.token, userId);
             console.info("[JadgesBadges] Authorization connected automatically");
             return;
         }
@@ -229,6 +237,23 @@ function stopAuthorization(): void {
     authRetryTimer = undefined;
     authAbortController?.abort();
     authAbortController = undefined;
+}
+
+function reportUserId(init: RequestInit | undefined): string | undefined {
+    if (typeof init?.body !== "string") return undefined;
+    try {
+        const payload = JSON.parse(init.body) as { userId?: unknown };
+        return typeof payload.userId === "string" && /^\d{15,22}$/.test(payload.userId)
+            ? payload.userId
+            : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+function reportBelongsToCurrentUser(init: RequestInit | undefined): boolean {
+    const currentUserId = UserStore.getCurrentUser()?.id;
+    return Boolean(currentUserId && reportUserId(init) === currentUserId);
 }
 
 function isOfficialDiscordBadgeImage(value: unknown): boolean {
@@ -337,6 +362,11 @@ function installFetchGuard(): void {
         }
 
         if (reportPath) {
+            // A user-bound token may only report the account currently logged
+            // into Discord. Viewing someone else's profile must never clear the
+            // local token or begin a new authorization flow.
+            if (!reportBelongsToCurrentUser(nextInit)) return ignoredResponse();
+
             const token = authorizationToken();
             if (!token) {
                 void ensureAuthorization();
