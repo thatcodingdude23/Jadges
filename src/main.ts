@@ -1,4 +1,5 @@
 import { mkdir } from "node:fs/promises";
+import { installBadgeDeleteIntegration } from "./badgeDeleteIntegration.js";
 import { installBrandIntegration } from "./brandIntegration.js";
 import { config } from "./config.js";
 import { installDesktopThemeIntegration } from "./desktopThemeIntegration.js";
@@ -15,6 +16,7 @@ import { installWebsiteIntegration } from "./websiteIntegration.js";
 
 await mkdir(config.imagesDir, { recursive: true });
 installFinalAssetIntegration();
+installBadgeDeleteIntegration();
 installHiddenDashboardIntegration();
 installVisibilityIntegration();
 installProfileVisibilityReportIntegration();
