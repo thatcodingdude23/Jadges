@@ -67,6 +67,59 @@
   text-align: center;
 }
 
+.badge-category-catalog .badge-category-count {
+  border-color: rgba(129, 140, 164, .27);
+  color: #9ca7bd;
+  background: rgba(129, 140, 164, .08);
+}
+
+.badge-card.catalog-only {
+  cursor: default !important;
+  border-color: rgba(111, 129, 164, .2);
+  background:
+    linear-gradient(145deg, rgba(23, 32, 50, .78), rgba(13, 20, 34, .9));
+  opacity: .76;
+  filter: saturate(.72);
+}
+
+.badge-card.catalog-only:hover {
+  transform: none;
+  border-color: rgba(111, 129, 164, .3);
+}
+
+.badge-card.catalog-only .badge-image {
+  filter: grayscale(.18);
+}
+
+.catalog-label {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  z-index: 3;
+  padding: 4px 7px;
+  border: 1px solid rgba(130, 145, 174, .28);
+  border-radius: 999px;
+  color: #aab4c8;
+  background: rgba(12, 18, 31, .86);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.catalog-label-bot {
+  border-color: rgba(251, 146, 60, .3);
+  color: #fdba74;
+  background: rgba(124, 45, 18, .28);
+}
+
+.catalog-label-unowned {
+  border-color: rgba(96, 165, 250, .28);
+  color: #93c5fd;
+  background: rgba(30, 64, 175, .18);
+}
+
 @media (max-width: 640px) {
   .badge-category-header {
     align-items: flex-start;
