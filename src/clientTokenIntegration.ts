@@ -212,6 +212,15 @@ function sendJson(
   else response.end(content);
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
 function sendConnectHtml(
   response: ServerResponse,
   title: string,
@@ -219,6 +228,8 @@ function sendConnectHtml(
   success: boolean,
 ): void {
   const color = success ? "#57f287" : "#ff6b81";
+  const safeTitle = escapeHtml(title);
+  const safeMessage = escapeHtml(message);
   response.writeHead(success ? 200 : 400, {
     "content-type": "text/html; charset=utf-8",
     "cache-control": "no-store",
@@ -226,7 +237,7 @@ function sendConnectHtml(
     "referrer-policy": "no-referrer",
     "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'",
   });
-  response.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>:root{color-scheme:dark;font-family:Inter,system-ui,sans-serif}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#080c16;color:#f4f7ff}.card{width:min(520px,calc(100% - 32px));padding:34px;border:1px solid #29324a;border-radius:22px;background:#111827;box-shadow:0 28px 90px #0008;text-align:center}.mark{width:58px;height:58px;margin:0 auto 18px;display:grid;place-items:center;border-radius:50%;border:2px solid ${color};color:${color};font-size:30px;font-weight:900}h1{margin:0;font-size:27px}p{margin:13px 0 0;color:#aab4ca;line-height:1.55}</style></head><body><main class="card"><div class="mark">${success ? "✓" : "!"}</div><h1>${title}</h1><p>${message}</p></main></body></html>`);
+  response.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${safeTitle}</title><style>:root{color-scheme:dark;font-family:Inter,system-ui,sans-serif}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#080c16;color:#f4f7ff}.card{width:min(520px,calc(100% - 32px));padding:34px;border:1px solid #29324a;border-radius:22px;background:#111827;box-shadow:0 28px 90px #0008;text-align:center}.mark{width:58px;height:58px;margin:0 auto 18px;display:grid;place-items:center;border-radius:50%;border:2px solid ${color};color:${color};font-size:30px;font-weight:900}h1{margin:0;font-size:27px}p{margin:13px 0 0;color:#aab4ca;line-height:1.55}</style></head><body><main class="card"><div class="mark">${success ? "✓" : "!"}</div><h1>${safeTitle}</h1><p>${safeMessage}</p></main></body></html>`);
 }
 
 function redirect(response: ServerResponse, location: string): void {
@@ -365,7 +376,7 @@ async function handleConnectStart(
   }
 
   const clientName = typeof body.client === "string"
-    ? body.client.trim().slice(0, 40)
+    ? body.client.trim().replace(/[^a-z0-9 ._-]/gi, "").slice(0, 40)
     : "Jadges";
   const deviceCode = randomBytes(24).toString("base64url");
   const pollSecret = randomBytes(32).toString("base64url");
