@@ -1,3 +1,4 @@
+import { recordDiscordBadgeCatalog } from "./discordBadgeCatalog.js";
 import {
   getOrCreateUser,
   mutateStore,
@@ -6,8 +7,6 @@ import type {
   NativeBadgeObservation,
   UserRecord,
 } from "./types.js";
-
-const STALE_NATIVE_BADGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 interface NativeStoreUser extends UserRecord {
   hiddenBadgeKeys?: string[];
@@ -30,7 +29,7 @@ export function isBotOnlyNativeBadgeName(value: string): boolean {
     || name === "bot http interactions";
 }
 
-function isAllowedNativeBadge(badge: NativeBadgeObservation): boolean {
+function isAllowedOwnedBadge(badge: NativeBadgeObservation): boolean {
   return !isBotOnlyNativeBadgeName(badge.name);
 }
 
@@ -54,13 +53,13 @@ function removeKeys(user: NativeStoreUser, keys: Set<string>): void {
   }
 }
 
-function replaceNativeBadges(
+function replaceOwnedNativeBadges(
   user: NativeStoreUser,
   badges: NativeBadgeObservation[],
 ): void {
   const next = [...new Map(
     badges
-      .filter(isAllowedNativeBadge)
+      .filter(isAllowedOwnedBadge)
       .slice(0, 25)
       .map((badge) => [badge.key, badge]),
   ).values()];
@@ -81,47 +80,22 @@ export async function setObservedNativeBadges(
   badges: NativeBadgeObservation[],
   authoritative = false,
 ): Promise<void> {
+  // Every valid Discord badge sighting contributes to the read-only catalogue.
+  // This includes bot/application badges and badges belonging to other users.
+  await recordDiscordBadgeCatalog(badges);
+
+  // Only Discord's own profile record for the logged-in account may change
+  // which badges that account owns. Older DOM reports are catalogue-only.
+  if (!authoritative) return;
+
+  let previous: NativeBadgeObservation[] = [];
   await mutateStore((data) => {
     const user = getOrCreateUser(data, userId) as NativeStoreUser;
-
-    if (authoritative) {
-      replaceNativeBadges(user, badges);
-      return;
-    }
-
-    const merged = new Map<string, NativeBadgeObservation>();
-    const removedBotKeys = new Set<string>();
-    const now = Date.now();
-    const orderedKeys = new Set(user.badgeOrder || []);
-
-    // Compatibility path for older clients. Keep previously detected user
-    // badges when Discord briefly renders only part of the profile row, but
-    // permanently discard known bot/application badges.
-    for (const badge of user.nativeBadges || []) {
-      if (!isAllowedNativeBadge(badge)) {
-        removedBotKeys.add(badge.key);
-        continue;
-      }
-
-      const updatedAt = Date.parse(badge.updatedAt);
-      const isRecent = Number.isFinite(updatedAt)
-        && now - updatedAt <= STALE_NATIVE_BADGE_MS;
-
-      if (isRecent || orderedKeys.has(badge.key)) {
-        merged.set(badge.key, badge);
-      }
-    }
-
-    for (const badge of badges.slice(0, 25)) {
-      if (!isAllowedNativeBadge(badge)) {
-        removedBotKeys.add(badge.key);
-        continue;
-      }
-      merged.set(badge.key, badge);
-    }
-
-    user.nativeBadges = [...merged.values()].slice(0, 25);
-    if (user.nativeBadges.length === 0) delete user.nativeBadges;
-    removeKeys(user, removedBotKeys);
+    previous = [...(user.nativeBadges || [])];
+    replaceOwnedNativeBadges(user, badges);
   });
+
+  // Preserve removed/stale definitions in the catalogue so they can appear in
+  // the separate "Other Discord badges" section without remaining owned.
+  await recordDiscordBadgeCatalog(previous);
 }
