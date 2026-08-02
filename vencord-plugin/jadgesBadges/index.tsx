@@ -4,7 +4,8 @@
  * into the Jadges directory or intercepting unrelated DM/status clicks.
  */
 
-import definePlugin from "@utils/types";
+import { Settings } from "@api/Settings";
+import definePlugin, { OptionType } from "@utils/types";
 
 import basePlugin from "./base";
 import {
@@ -20,6 +21,10 @@ import { startUpdateChecker, stopUpdateChecker } from "./updater";
 import { startVisibilitySync, stopVisibilitySync } from "./visibilitySync";
 
 const BADGE_QUERY = 'img[class*="badge"], img.jadges-profile-badge-image';
+const PROTECTED_REPORT_PATHS = [
+    "/api/native-badges",
+    "/api/profile-visible-badges"
+];
 
 type FetchFunction = typeof globalThis.fetch;
 type QuerySelectorAll = typeof document.querySelectorAll;
@@ -108,6 +113,15 @@ function prepareNativeBadgeReport(init: RequestInit | undefined): NativeReportDe
     }
 }
 
+function withClientAuthorization(init: RequestInit | undefined): RequestInit {
+    const headers = new Headers(init?.headers);
+    const token = String(
+        Settings.plugins.JadgesBadges?.authorizationToken || ""
+    ).trim();
+    if (token) headers.set("authorization", `Bearer ${token}`);
+    return { ...(init || {}), headers };
+}
+
 function stripNativeBadgesFromDirectory(data: unknown): unknown {
     if (!data || typeof data !== "object" || Array.isArray(data)) return data;
 
@@ -144,6 +158,10 @@ function installFetchGuard(): void {
                 });
             }
             nextInit = decision.init;
+        }
+
+        if (PROTECTED_REPORT_PATHS.some(path => url.includes(path))) {
+            nextInit = withClientAuthorization(nextInit);
         }
 
         const response = await originalFetch!(input, nextInit);
@@ -223,7 +241,15 @@ export default definePlugin({
     description: "Displays Jadges badges, rearranges native Discord badges, syncs account themes, and installs verified Jadges updates.",
     authors: [{ name: "Jaycord", id: 0n }],
     dependencies: ["BadgeAPI"],
-    options: (basePlugin as any).options,
+    options: {
+        ...(basePlugin as any).options,
+        authorizationToken: {
+            type: OptionType.STRING,
+            description: "Token generated in the Jadges website dashboard for protected profile reporting",
+            default: "",
+            restartNeeded: false
+        }
+    },
     start: startWithoutGlobalBadgeClick,
     stop() {
         try {
