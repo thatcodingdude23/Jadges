@@ -160,7 +160,7 @@ async function enrichDashboardData(value: unknown): Promise<unknown> {
 
   const catalogBadges: DashboardBadgeLike[] = catalog
     .filter((badge) => !ownedNativeKeys.has(badge.key))
-    .map((badge) => ({
+    .map((badge): DashboardBadgeLike => ({
       key: `catalog:${badge.key}`,
       name: badge.name,
       image: badge.image,
