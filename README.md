@@ -8,6 +8,7 @@ Jadges is a custom Discord badge system that lets users submit profile badges, c
 
 - **Vencord** — desktop
 - **Revenge** — Android
+- **Kettu** — Android and iOS
 
 Only users with the Jadges plugin installed can see Jadges customizations.
 
@@ -23,7 +24,7 @@ Only users with the Jadges plugin installed can see Jadges customizations.
 - Administrative badge deletion with a reason DM
 - Staff approval and denial buttons
 - Badge limits, booster slots, and badge-name filtering
-- Vencord and Revenge support
+- Vencord, Revenge, and Kettu support
 
 ## Commands
 
@@ -107,6 +108,16 @@ Add this plugin source URL in Revenge:
 ```text
 https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/
 ```
+
+## Kettu
+
+Open **Kettu Settings → Plugins**, add a plugin from URL, and paste:
+
+```text
+https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/kettu-plugin/
+```
+
+The Kettu build uses Kettu's Vendetta compatibility APIs for profile badge rendering and ordering, hidden-badge synchronization, and account-theme synchronization.
 
 ## Privacy and security
 
