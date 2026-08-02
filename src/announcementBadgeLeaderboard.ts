@@ -169,7 +169,7 @@ async function buildPage(
 
   const embed = new EmbedBuilder()
     .setColor(0x8b5cf6)
-    .setTitle("<:mamjjq:1533356262996181133> Jadges Badge Collectors Leaderboard")
+    .setTitle("<:asxfbfedbv:1533359296060850237> Jadges Badge Collectors Leaderboard")
     .setDescription(description)
     .setFooter({
       text: `${FOOTER_PREFIX} • Page ${page + 1}/${totalPages} • Updates every 60 seconds`,
