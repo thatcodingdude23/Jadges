@@ -1,20 +1,27 @@
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import http, {
   type RequestListener,
   type ServerResponse,
 } from "node:http";
+import path from "node:path";
 import { config } from "./config.js";
 
 const PARTNER_ROLE_ID = "1531693452314808461";
 const PARTNER_BADGE_KEY = "partner";
 const PARTNER_BADGE_NAME = "Jaycord Partner";
-const PARTNER_BADGE_URL =
+const PARTNER_BADGE_PATH = "/assets/jaycord-partner.webp";
+const PARTNER_BADGE_URL = new URL(PARTNER_BADGE_PATH, config.publicUrl).toString();
+const PARTNER_BADGE_SOURCE_URL =
   "https://media.discordapp.net/attachments/1472616427956604940/1533434306192609390/3f9748e53446a137a052f3454e2de41e-1.png?ex=6a70797c&is=6a6f27fc&hm=f48f2286cc754ac225a73bffbd0d29c255f737874686ddadd17c49b0ec000fd4&=&format=webp&quality=lossless";
+const PARTNER_BADGE_CACHE_FILE = path.join(config.dataDir, "jaycord-partner.webp");
 const PARTNER_SYNC_INTERVAL_MS = 60_000;
 
 let installed = false;
 let partnerUserIds = new Set<string>();
 let lastPartnerSyncAt = 0;
 let partnerSyncPromise: Promise<void> | undefined;
+let partnerBadgeAsset: Buffer | undefined;
+let partnerBadgeAssetPromise: Promise<Buffer> | undefined;
 
 interface BadgeLike {
   key?: unknown;
@@ -25,6 +32,89 @@ interface BadgeLike {
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return isObjectRecord(error) && error.code === "ENOENT";
+}
+
+async function downloadAndCachePartnerBadge(): Promise<Buffer> {
+  const response = await fetch(PARTNER_BADGE_SOURCE_URL, {
+    headers: {
+      "user-agent": "Jadges/1.0",
+    },
+    signal: AbortSignal.timeout(20_000),
+  });
+
+  if (!response.ok) {
+    const details = await response.text().catch(() => "");
+    throw new Error(
+      `Partner badge image download returned HTTP ${response.status}${
+        details ? `: ${details.slice(0, 300)}` : ""
+      }`,
+    );
+  }
+
+  const image = Buffer.from(await response.arrayBuffer());
+  if (image.length === 0) {
+    throw new Error("Partner badge image download returned an empty file");
+  }
+
+  await mkdir(config.dataDir, { recursive: true });
+  const temporaryFile = `${PARTNER_BADGE_CACHE_FILE}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(temporaryFile, image);
+  await rename(temporaryFile, PARTNER_BADGE_CACHE_FILE);
+
+  console.log(`Cached the Jaycord Partner badge at ${PARTNER_BADGE_CACHE_FILE}.`);
+  return image;
+}
+
+async function loadPartnerBadgeAsset(): Promise<Buffer> {
+  if (partnerBadgeAsset) return partnerBadgeAsset;
+
+  try {
+    partnerBadgeAsset = await readFile(PARTNER_BADGE_CACHE_FILE);
+    return partnerBadgeAsset;
+  } catch (error) {
+    if (!isMissingFileError(error)) throw error;
+  }
+
+  if (!partnerBadgeAssetPromise) {
+    partnerBadgeAssetPromise = downloadAndCachePartnerBadge()
+      .then((image) => {
+        partnerBadgeAsset = image;
+        return image;
+      })
+      .finally(() => {
+        partnerBadgeAssetPromise = undefined;
+      });
+  }
+
+  return partnerBadgeAssetPromise;
+}
+
+async function servePartnerBadge(
+  requestMethod: string | undefined,
+  response: ServerResponse,
+): Promise<void> {
+  try {
+    const image = await loadPartnerBadgeAsset();
+    response.writeHead(200, {
+      "access-control-allow-origin": "*",
+      "cache-control": "public, max-age=31536000, immutable",
+      "content-length": String(image.byteLength),
+      "content-type": "image/webp",
+      "x-content-type-options": "nosniff",
+    });
+    response.end(requestMethod === "HEAD" ? undefined : image);
+  } catch (error) {
+    console.error("Could not serve the Jaycord Partner badge image:", error);
+    response.writeHead(503, {
+      "cache-control": "no-store",
+      "content-type": "text/plain; charset=utf-8",
+    });
+    response.end("Jaycord Partner badge image is temporarily unavailable.");
+  }
 }
 
 async function refreshPartnerMembers(): Promise<void> {
@@ -182,6 +272,15 @@ async function transformJsonBody(pathname: string, body: string): Promise<string
 function wrap(listener: RequestListener): RequestListener {
   return (request, response) => {
     const url = new URL(request.url || "/", "https://jadges.local");
+
+    if (
+      (request.method === "GET" || request.method === "HEAD")
+      && url.pathname === PARTNER_BADGE_PATH
+    ) {
+      void servePartnerBadge(request.method, response);
+      return;
+    }
+
     const shouldTransform = request.method === "GET"
       && (url.pathname === "/badges.json" || /^\/users\/\d{15,22}$/.test(url.pathname));
 
@@ -232,7 +331,11 @@ export function installPartnerBadgeIntegration(): void {
   if (installed) return;
   installed = true;
 
+  void loadPartnerBadgeAsset().catch((error) => {
+    console.error("Could not cache the Jaycord Partner badge image:", error);
+  });
   void ensurePartnerMembersFresh();
+
   const timer = setInterval(() => {
     void ensurePartnerMembersFresh();
   }, PARTNER_SYNC_INTERVAL_MS);
