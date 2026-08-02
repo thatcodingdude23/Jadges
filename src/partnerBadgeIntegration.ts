@@ -197,21 +197,23 @@ function wrap(listener: RequestListener): RequestListener {
       if (ended) return response;
       ended = true;
 
-      const contentType = String(response.getHeader("content-type") || "");
       if (
         chunk === undefined ||
         response.statusCode < 200 ||
-        response.statusCode >= 300 ||
-        !contentType.includes("application/json")
+        response.statusCode >= 300
       ) {
         originalEnd(chunk, encoding, callback);
         return response;
       }
 
-      const body = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+      const body = Buffer.isBuffer(chunk)
+        ? chunk.toString("utf8")
+        : chunk instanceof Uint8Array
+          ? Buffer.from(chunk).toString("utf8")
+          : String(chunk);
+
       void transformJsonBody(url.pathname, body)
         .then((transformed) => {
-          response.removeHeader("content-length");
           originalEnd(transformed, "utf8", callback);
         })
         .catch((error) => {
