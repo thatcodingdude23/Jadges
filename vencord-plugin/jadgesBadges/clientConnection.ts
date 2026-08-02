@@ -1,7 +1,7 @@
-import { Settings } from "@api/Settings";
 import { UserStore } from "@webpack/common";
 
 const API_ORIGIN = "https://jadges.onrender.com";
+const STORAGE_KEY = "jadges.clientAuthorizationToken";
 const RETRY_AFTER_MS = 8_000;
 
 type ConnectionStart = {
@@ -24,20 +24,26 @@ let stopped = false;
 let abortController: AbortController | undefined;
 let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
-function pluginSettings(): { authorizationToken?: string; } {
-    return Settings.plugins.JadgesBadges as { authorizationToken?: string; };
-}
-
 export function clientAuthorizationToken(): string {
-    return String(pluginSettings()?.authorizationToken || "").trim();
+    try {
+        return String(localStorage.getItem(STORAGE_KEY) || "").trim();
+    } catch {
+        return "";
+    }
 }
 
 function saveToken(token: string): void {
-    pluginSettings().authorizationToken = token;
+    try {
+        localStorage.setItem(STORAGE_KEY, token);
+    } catch (error) {
+        console.warn("[JadgesBadges] Could not save client authorization:", error);
+    }
 }
 
 function clearToken(): void {
-    pluginSettings().authorizationToken = "";
+    try {
+        localStorage.removeItem(STORAGE_KEY);
+    } catch {}
 }
 
 function scheduleRetry(): void {
@@ -145,7 +151,6 @@ export async function ensureClientAuthorization(): Promise<void> {
 }
 
 export function invalidateClientAuthorization(): void {
-    if (!clientAuthorizationToken()) return;
     clearToken();
     void ensureClientAuthorization();
 }
