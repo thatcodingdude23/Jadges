@@ -24,6 +24,7 @@ Only users with the Jadges plugin installed can see Jadges customizations.
 - Administrative badge deletion with a reason DM
 - Staff approval and denial buttons
 - Badge limits, booster slots, and badge-name filtering
+- User-bound authorization tokens for client profile reports
 - Vencord, Revenge, and Kettu support
 
 ## Commands
@@ -93,6 +94,16 @@ MAX_BADGE_SIZE
 
 Enable **Server Members Intent** in the Discord Developer Portal so the automatic Jaycord Staff role badge can sync.
 
+## Plugin authorization
+
+The native-badge inventory and visible-profile report APIs require a user-bound bearer token.
+
+1. Sign in to the Jadges website dashboard.
+2. Under **Plugin authorization token**, select **Generate token**.
+3. Copy the token and paste it into the Jadges plugin settings in Vencord, Revenge, or Kettu.
+
+Only the token hash is stored on the server. Tokens expire after 90 days, are restricted to the Discord account that generated them, and can be rotated or revoked from the dashboard. Generating a replacement invalidates the previous token immediately.
+
 ## Vencord
 
 Copy this folder into `Vencord/src/userplugins/` and rebuild Vencord:
@@ -117,8 +128,10 @@ Open **Kettu Settings → Plugins**, add a plugin from URL, and paste:
 https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/kettu-plugin/
 ```
 
-The Kettu build uses Kettu's Vendetta compatibility APIs for profile badge rendering and ordering, hidden-badge synchronization, and account-theme synchronization.
+The Kettu build uses Kettu's Vendetta compatibility APIs for profile badge rendering and ordering, hidden-badge synchronization, account-theme synchronization, and protected client reporting.
 
 ## Privacy and security
 
 OAuth access is limited to the `identify` scope. Rearrangement links expire, are bound to the Discord user who ran the command, and require a signed session cookie before badge data can be changed. If a different Discord account attempts to open or authorize a rearrangement link, Jadges terminates that exact link and sends the original owner a security-alert DM.
+
+Client report tokens are never embedded in public JavaScript or plugin files. The server accepts profile reports only when the bearer token is active and belongs to the same Discord user ID contained in the request.
