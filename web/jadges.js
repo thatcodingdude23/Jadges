@@ -34,6 +34,10 @@
     return [...pinned, ...movableBadges()];
   }
 
+  function catalogueBadges() {
+    return Array.isArray(state.catalogBadges) ? state.catalogBadges : [];
+  }
+
   function categoryFor(badge) {
     return badge.key.startsWith("discord:") ? "native" : "jadges";
   }
@@ -105,15 +109,23 @@
   }
 
   function createBadgeCard(badge, movableIndex, movableCount, category) {
+    const catalogOnly = badge.catalogOnly === true;
     const card = document.createElement("article");
-    card.className = `badge-card${badge.movable ? "" : " pinned"}`;
+    card.className = `badge-card${badge.movable ? "" : " pinned"}${catalogOnly ? " catalog-only" : ""}`;
     card.dataset.key = badge.key;
     card.dataset.category = category;
-    card.dataset.movable = String(badge.movable);
-    card.draggable = badge.movable;
+    card.dataset.movable = String(badge.movable && !catalogOnly);
+    card.dataset.manageable = String(!catalogOnly);
+    card.draggable = badge.movable && !catalogOnly;
 
-    if (badge.movable) card.append(createGrip());
-    else {
+    if (catalogOnly) {
+      const label = document.createElement("span");
+      label.className = `catalog-label catalog-label-${badge.catalogKind === "bot" ? "bot" : "unowned"}`;
+      label.textContent = badge.catalogKind === "bot" ? "Bot badge" : "Not owned";
+      card.append(label);
+    } else if (badge.movable) {
+      card.append(createGrip());
+    } else {
       const pin = document.createElement("span");
       pin.className = "pin-label";
       pin.textContent = "Official";
@@ -140,7 +152,7 @@
 
     card.append(imageWrap, name, kind);
 
-    if (badge.movable) {
+    if (badge.movable && !catalogOnly) {
       const controls = document.createElement("div");
       controls.className = "badge-move";
 
@@ -165,7 +177,7 @@
     }
 
     card.addEventListener("dragstart", (event) => {
-      if (!badge.movable) return;
+      if (!badge.movable || catalogOnly) return;
       draggingKey = badge.key;
       draggingCategory = category;
       card.classList.add("dragging");
@@ -184,7 +196,8 @@
 
     card.addEventListener("dragover", (event) => {
       if (
-        !badge.movable
+        catalogOnly
+        || !badge.movable
         || !draggingKey
         || draggingKey === badge.key
         || draggingCategory !== category
@@ -199,7 +212,8 @@
       event.preventDefault();
       card.classList.remove("over");
       if (
-        !badge.movable
+        catalogOnly
+        || !badge.movable
         || !draggingKey
         || draggingKey === badge.key
         || draggingCategory !== category
@@ -248,8 +262,14 @@
       empty.className = "badge-category-empty";
       empty.textContent = category === "native"
         ? "Open your Discord profile with Jadges enabled to detect native badges."
-        : "No Jadges badges are available yet.";
+        : category === "catalog"
+          ? "More Discord badges will appear here as Jadges encounters them."
+          : "No Jadges badges are available yet.";
       categoryGrid.append(empty);
+    } else if (category === "catalog") {
+      for (const badge of badges) {
+        categoryGrid.append(createBadgeCard(badge, -1, 0, category));
+      }
     } else {
       const movableKeys = categoryKeys(category);
       for (const badge of badges) {
@@ -272,6 +292,7 @@
     const badges = displayedBadges();
     const jadgesBadges = badges.filter((badge) => categoryFor(badge) === "jadges");
     const nativeBadges = badges.filter((badge) => categoryFor(badge) === "native");
+    const catalog = catalogueBadges();
 
     grid.append(
       createCategory(
@@ -282,9 +303,15 @@
       ),
       createCategory(
         "native",
-        "Native Discord badges",
-        "Badges belonging to your Discord account, detected directly from your profile.",
+        "Your native Discord badges",
+        "Badges currently belonging to your Discord account.",
         nativeBadges,
+      ),
+      createCategory(
+        "catalog",
+        "Other Discord badges",
+        "Bot badges and Discord badges that are not currently on your account. These are view-only.",
+        catalog,
       ),
     );
   }
