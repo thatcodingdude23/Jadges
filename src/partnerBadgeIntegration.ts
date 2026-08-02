@@ -8,7 +8,7 @@ const PARTNER_ROLE_ID = "1531693452314808461";
 const PARTNER_BADGE_KEY = "partner";
 const PARTNER_BADGE_NAME = "Jaycord Partner";
 const PARTNER_BADGE_URL =
-  "https://cdn.discordapp.com/emojis/846569337119703092.webp?size=40";
+  "https://media.discordapp.net/attachments/1472616427956604940/1533434306192609390/3f9748e53446a137a052f3454e2de41e-1.png?ex=6a70797c&is=6a6f27fc&hm=f48f2286cc754ac225a73bffbd0d29c255f737874686ddadd17c49b0ec000fd4&=&format=webp&quality=lossless";
 const PARTNER_SYNC_INTERVAL_MS = 60_000;
 
 let installed = false;
