@@ -14,6 +14,7 @@
   const saveIndicator = document.getElementById("save-indicator");
   const sideButtons = [...document.querySelectorAll("[data-side]")];
   let draggingKey = null;
+  let draggingCategory = null;
   let saveQueue = Promise.resolve();
 
   function setSaveState(text, isError = false) {
@@ -31,6 +32,18 @@
   function displayedBadges() {
     const pinned = state.badges.filter((badge) => !badge.movable);
     return [...pinned, ...movableBadges()];
+  }
+
+  function categoryFor(badge) {
+    return badge.key.startsWith("discord:") ? "native" : "jadges";
+  }
+
+  function categoryKeys(category) {
+    const byKey = new Map(state.badges.map((badge) => [badge.key, badge]));
+    return state.order.filter((key) => {
+      const badge = byKey.get(key);
+      return badge && categoryFor(badge) === category;
+    });
   }
 
   async function save(patch) {
@@ -61,12 +74,21 @@
     return saveQueue;
   }
 
-  function moveBadge(key, offset) {
-    const index = state.order.indexOf(key);
-    const target = index + offset;
-    if (index < 0 || target < 0 || target >= state.order.length) return;
+  function moveBadge(key, offset, category) {
+    const keys = categoryKeys(category);
+    const index = keys.indexOf(key);
+    const targetKey = keys[index + offset];
+    if (index < 0 || !targetKey) return;
+
+    const currentPosition = state.order.indexOf(key);
+    const targetPosition = state.order.indexOf(targetKey);
+    if (currentPosition < 0 || targetPosition < 0) return;
+
     const previous = [...state.order];
-    [state.order[index], state.order[target]] = [state.order[target], state.order[index]];
+    [state.order[currentPosition], state.order[targetPosition]] = [
+      state.order[targetPosition],
+      state.order[currentPosition],
+    ];
     render();
     void save({ order: state.order }).catch(() => {
       state.order = previous;
@@ -82,10 +104,11 @@
     return grip;
   }
 
-  function createBadgeCard(badge, movableIndex, movableCount) {
+  function createBadgeCard(badge, movableIndex, movableCount, category) {
     const card = document.createElement("article");
     card.className = `badge-card${badge.movable ? "" : " pinned"}`;
     card.dataset.key = badge.key;
+    card.dataset.category = category;
     card.dataset.movable = String(badge.movable);
     card.draggable = badge.movable;
 
@@ -127,7 +150,7 @@
       previous.title = "Move earlier";
       previous.setAttribute("aria-label", `Move ${badge.name} earlier`);
       previous.disabled = movableIndex <= 0;
-      previous.addEventListener("click", () => moveBadge(badge.key, -1));
+      previous.addEventListener("click", () => moveBadge(badge.key, -1, category));
 
       const next = document.createElement("button");
       next.type = "button";
@@ -135,7 +158,7 @@
       next.title = "Move later";
       next.setAttribute("aria-label", `Move ${badge.name} later`);
       next.disabled = movableIndex >= movableCount - 1;
-      next.addEventListener("click", () => moveBadge(badge.key, 1));
+      next.addEventListener("click", () => moveBadge(badge.key, 1, category));
 
       controls.append(previous, next);
       card.append(controls);
@@ -144,6 +167,7 @@
     card.addEventListener("dragstart", (event) => {
       if (!badge.movable) return;
       draggingKey = badge.key;
+      draggingCategory = category;
       card.classList.add("dragging");
       if (event.dataTransfer) {
         event.dataTransfer.effectAllowed = "move";
@@ -153,12 +177,18 @@
 
     card.addEventListener("dragend", () => {
       draggingKey = null;
+      draggingCategory = null;
       card.classList.remove("dragging");
       document.querySelectorAll(".badge-card.over").forEach((item) => item.classList.remove("over"));
     });
 
     card.addEventListener("dragover", (event) => {
-      if (!badge.movable || !draggingKey || draggingKey === badge.key) return;
+      if (
+        !badge.movable
+        || !draggingKey
+        || draggingKey === badge.key
+        || draggingCategory !== category
+      ) return;
       event.preventDefault();
       card.classList.add("over");
     });
@@ -168,7 +198,12 @@
     card.addEventListener("drop", (event) => {
       event.preventDefault();
       card.classList.remove("over");
-      if (!badge.movable || !draggingKey || draggingKey === badge.key) return;
+      if (
+        !badge.movable
+        || !draggingKey
+        || draggingKey === badge.key
+        || draggingCategory !== category
+      ) return;
 
       const from = state.order.indexOf(draggingKey);
       const to = state.order.indexOf(badge.key);
@@ -186,25 +221,72 @@
     return card;
   }
 
-  function renderGrid() {
-    if (!grid) return;
-    grid.replaceChildren();
-    const badges = displayedBadges();
-    const movable = badges.filter((badge) => badge.movable);
+  function createCategory(category, title, description, badges) {
+    const section = document.createElement("section");
+    section.className = `badge-category-section badge-category-${category}`;
+
+    const header = document.createElement("div");
+    header.className = "badge-category-header";
+    const copy = document.createElement("div");
+    copy.className = "badge-category-copy";
+    const heading = document.createElement("h3");
+    heading.textContent = title;
+    const detail = document.createElement("p");
+    detail.textContent = description;
+    copy.append(heading, detail);
+
+    const count = document.createElement("span");
+    count.className = "badge-category-count";
+    count.textContent = `${badges.length} badge${badges.length === 1 ? "" : "s"}`;
+    header.append(copy, count);
+
+    const categoryGrid = document.createElement("div");
+    categoryGrid.className = "badge-category-grid";
 
     if (badges.length === 0) {
       const empty = document.createElement("div");
-      empty.className = "empty-state";
-      empty.innerHTML = "<div><strong>No badges to arrange yet</strong><br><span>Once a badge is available on your profile, it will appear here automatically.</span></div>";
-      grid.append(empty);
-      return;
+      empty.className = "badge-category-empty";
+      empty.textContent = category === "native"
+        ? "Open your Discord profile with Jadges enabled to detect native badges."
+        : "No Jadges badges are available yet.";
+      categoryGrid.append(empty);
+    } else {
+      const movableKeys = categoryKeys(category);
+      for (const badge of badges) {
+        const index = badge.movable ? movableKeys.indexOf(badge.key) : -1;
+        categoryGrid.append(
+          createBadgeCard(badge, index, movableKeys.length, category),
+        );
+      }
     }
 
-    let movableIndex = 0;
-    for (const badge of badges) {
-      const index = badge.movable ? movableIndex++ : -1;
-      grid.append(createBadgeCard(badge, index, movable.length));
-    }
+    section.append(header, categoryGrid);
+    return section;
+  }
+
+  function renderGrid() {
+    if (!grid) return;
+    grid.replaceChildren();
+    grid.classList.add("badge-category-layout");
+
+    const badges = displayedBadges();
+    const jadgesBadges = badges.filter((badge) => categoryFor(badge) === "jadges");
+    const nativeBadges = badges.filter((badge) => categoryFor(badge) === "native");
+
+    grid.append(
+      createCategory(
+        "jadges",
+        "Jadges badges",
+        "Official, uploaded, and equipped Nitro badges managed through Jadges.",
+        jadgesBadges,
+      ),
+      createCategory(
+        "native",
+        "Native Discord badges",
+        "Badges belonging to your Discord account, detected directly from your profile.",
+        nativeBadges,
+      ),
+    );
   }
 
   function renderPreview() {
@@ -213,6 +295,7 @@
     for (const badge of displayedBadges()) {
       const item = document.createElement("span");
       item.className = "preview-badge";
+      item.dataset.key = badge.key;
       item.title = badge.name;
       const image = document.createElement("img");
       image.src = badge.image;
