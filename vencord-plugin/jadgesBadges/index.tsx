@@ -4,10 +4,16 @@
  * into the Jadges directory or intercepting unrelated DM/status clicks.
  */
 
-import { Settings } from "@api/Settings";
-import definePlugin, { OptionType } from "@utils/types";
+import definePlugin from "@utils/types";
 
 import basePlugin from "./base";
+import {
+    clientAuthorizationToken,
+    ensureClientAuthorization,
+    invalidateClientAuthorization,
+    startClientAuthorization,
+    stopClientAuthorization
+} from "./clientConnection";
 import {
     startNativeInventorySync,
     stopNativeInventorySync
@@ -59,6 +65,13 @@ function protectedReportPath(value: string): string | undefined {
     }
 }
 
+function ignoredResponse(): Response {
+    return new Response(JSON.stringify({ ok: true, ignored: true }), {
+        status: 202,
+        headers: { "content-type": "application/json; charset=utf-8" }
+    });
+}
+
 function isOfficialDiscordBadgeImage(value: unknown): boolean {
     if (typeof value !== "string") return false;
 
@@ -89,8 +102,6 @@ function prepareNativeBadgeReport(init: RequestInit | undefined): NativeReportDe
             badges?: Array<{ key?: unknown; name?: unknown; image?: unknown; }>;
         };
 
-        // V.27 replaces the old DOM scanner. Only the authoritative inventory
-        // produced from Discord's UserProfileStore is allowed to reach Jadges.
         if (
             payload.authoritative !== true
             || typeof payload.userId !== "string"
@@ -126,13 +137,12 @@ function prepareNativeBadgeReport(init: RequestInit | undefined): NativeReportDe
     }
 }
 
-function withClientAuthorization(init: RequestInit | undefined): RequestInit {
+function withClientAuthorization(
+    init: RequestInit | undefined,
+    token: string
+): RequestInit {
     const headers = new Headers(init?.headers);
-    const pluginSettings = Settings.plugins.JadgesBadges as {
-        authorizationToken?: string;
-    } | undefined;
-    const token = String(pluginSettings?.authorizationToken || "").trim();
-    if (token) headers.set("authorization", `Bearer ${token}`);
+    headers.set("authorization", `Bearer ${token}`);
     return { ...(init || {}), headers };
 }
 
@@ -166,20 +176,24 @@ function installFetchGuard(): void {
 
         if (reportPath === "/api/native-badges") {
             const decision = prepareNativeBadgeReport(init);
-            if (decision.skip) {
-                return new Response(JSON.stringify({ ok: true, ignored: true }), {
-                    status: 202,
-                    headers: { "content-type": "application/json; charset=utf-8" }
-                });
-            }
+            if (decision.skip) return ignoredResponse();
             nextInit = decision.init;
         }
 
         if (reportPath) {
-            nextInit = withClientAuthorization(nextInit);
+            const token = clientAuthorizationToken();
+            if (!token) {
+                void ensureClientAuthorization();
+                return ignoredResponse();
+            }
+            nextInit = withClientAuthorization(nextInit, token);
         }
 
         const response = await originalFetch!(input, nextInit);
+        if (reportPath && response.status === 401) {
+            invalidateClientAuthorization();
+            return ignoredResponse();
+        }
 
         if (!url.includes("/settings.json") || !response.ok) return response;
 
@@ -227,6 +241,7 @@ function restoreGuards(): void {
 async function startWithoutGlobalBadgeClick(): Promise<void> {
     installFetchGuard();
     installBadgeQueryFilter();
+    startClientAuthorization();
 
     const originalAdd = document.addEventListener.bind(document) as AddEventListener;
     let blockedCaptureClick = false;
@@ -253,21 +268,14 @@ async function startWithoutGlobalBadgeClick(): Promise<void> {
 
 export default definePlugin({
     name: "JadgesBadges",
-    description: "Displays Jadges badges, rearranges native Discord badges, syncs account themes, and installs verified Jadges updates.",
+    description: "Displays Jadges badges, rearranges native Discord badges, syncs account themes, and authorizes profile reporting automatically.",
     authors: [{ name: "Jaycord", id: 0n }],
     dependencies: ["BadgeAPI"],
-    options: {
-        ...(basePlugin as any).options,
-        authorizationToken: {
-            type: OptionType.STRING,
-            description: "Token generated in the Jadges website dashboard for protected profile reporting",
-            default: "",
-            restartNeeded: false
-        }
-    },
+    options: (basePlugin as any).options,
     start: startWithoutGlobalBadgeClick,
     stop() {
         try {
+            stopClientAuthorization();
             stopNativeInventorySync();
             stopProfileVisibilityReporter();
             stopVisibilitySync();
