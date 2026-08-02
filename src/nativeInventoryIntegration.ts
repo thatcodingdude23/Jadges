@@ -3,7 +3,6 @@ import http, {
   type RequestListener,
   type ServerResponse,
 } from "node:http";
-import { verifyClientAuthorization } from "./clientAuth.js";
 import { setObservedNativeBadges } from "./nativeStore.js";
 import type { NativeBadgeObservation } from "./types.js";
 
@@ -35,9 +34,8 @@ function sendJson(
     "cache-control": "no-store",
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "POST, OPTIONS",
-    "access-control-allow-headers": "content-type, authorization",
+    "access-control-allow-headers": "content-type",
     "x-content-type-options": "nosniff",
-    ...(status === 401 ? { "www-authenticate": "Bearer" } : {}),
   });
   response.end(JSON.stringify(body));
 }
@@ -73,7 +71,7 @@ async function handleNativeInventory(
     response.writeHead(204, {
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "POST, OPTIONS",
-      "access-control-allow-headers": "content-type, authorization",
+      "access-control-allow-headers": "content-type",
       "access-control-max-age": "86400",
     });
     response.end();
@@ -93,12 +91,6 @@ async function handleNativeInventory(
     };
     const userId = typeof body.userId === "string" ? body.userId.trim() : "";
     if (!/^\d{15,22}$/.test(userId)) throw new Error("Invalid Discord user ID");
-
-    if (!await verifyClientAuthorization(request, userId)) {
-      sendJson(response, 401, { error: "A valid Jadges client authorization token is required" });
-      return;
-    }
-
     if (!Array.isArray(body.badges) || body.badges.length > MAX_BADGES) {
       throw new Error("Invalid native badge list");
     }
