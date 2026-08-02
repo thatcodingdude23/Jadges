@@ -7,6 +7,10 @@
 import definePlugin from "@utils/types";
 
 import basePlugin from "./base";
+import {
+    startProfileVisibilityReporter,
+    stopProfileVisibilityReporter
+} from "./profileVisibilityReporter";
 import { startThemeSync, stopThemeSync } from "./themeSync";
 import { startUpdateChecker, stopUpdateChecker } from "./updater";
 import { startVisibilitySync, stopVisibilitySync } from "./visibilitySync";
@@ -169,6 +173,7 @@ async function startWithoutGlobalBadgeClick(): Promise<void> {
         startUpdateChecker();
         startThemeSync();
         startVisibilitySync();
+        startProfileVisibilityReporter();
     } finally {
         document.addEventListener = originalAdd;
     }
@@ -183,6 +188,7 @@ export default definePlugin({
     start: startWithoutGlobalBadgeClick,
     stop() {
         try {
+            stopProfileVisibilityReporter();
             stopVisibilitySync();
             stopThemeSync();
             stopUpdateChecker();
