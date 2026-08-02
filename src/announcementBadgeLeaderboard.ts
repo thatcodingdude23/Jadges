@@ -115,12 +115,20 @@ function navigationRow(page: number): ActionRowBuilder<ButtonBuilder> {
     new ButtonBuilder()
       .setCustomId(`${BUTTON_PREFIX}:previous:${page}`)
       .setLabel("Previous")
-      .setEmoji("⬅️")
+      .setEmoji({
+        id: "1533356860948877483",
+        name: "efktwdqwz",
+        animated: true,
+      })
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(`${BUTTON_PREFIX}:next:${page}`)
       .setLabel("Next")
-      .setEmoji("➡️")
+      .setEmoji({
+        id: "1533356477883089006",
+        name: "rghtqz",
+        animated: true,
+      })
       .setStyle(ButtonStyle.Primary),
   );
 }
@@ -161,7 +169,7 @@ async function buildPage(
 
   const embed = new EmbedBuilder()
     .setColor(0x8b5cf6)
-    .setTitle("🏆 Jadges Badge Collectors Leaderboard")
+    .setTitle("<:mamjjq:1533356262996181133> Jadges Badge Collectors Leaderboard")
     .setDescription(description)
     .setFooter({
       text: `${FOOTER_PREFIX} • Page ${page + 1}/${totalPages} • Updates every 60 seconds`,
