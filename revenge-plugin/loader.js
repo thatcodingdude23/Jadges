@@ -14,6 +14,9 @@
 
   const loadedPlugins = [];
   let originalSafeFetch;
+  let connecting = false;
+  let stopped = false;
+  let retryTimer;
 
   function currentUserId() {
     try {
@@ -27,6 +30,14 @@
 
   function authorizationToken() {
     return String(vendetta.plugin?.storage?.authorizationToken || "").trim();
+  }
+
+  function saveAuthorizationToken(token) {
+    vendetta.plugin.storage.authorizationToken = token;
+  }
+
+  function clearAuthorizationToken() {
+    vendetta.plugin.storage.authorizationToken = "";
   }
 
   function protectedPath(value) {
@@ -52,6 +63,92 @@
     };
   }
 
+  function scheduleRetry() {
+    if (stopped) return;
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(() => void ensureAuthorization(), 8000);
+  }
+
+  function wait(milliseconds) {
+    return new Promise(resolve => setTimeout(resolve, milliseconds));
+  }
+
+  async function openAuthorizationPage(url) {
+    const linking = vendetta.metro.common?.ReactNative?.Linking;
+    if (typeof linking?.openURL === "function") {
+      await linking.openURL(url);
+      return;
+    }
+    const nativeLinking = globalThis.nativeModuleProxy?.LinkingManager;
+    if (typeof nativeLinking?.openURL === "function") {
+      await nativeLinking.openURL(url);
+      return;
+    }
+    const fallback = vendetta.metro.findByProps?.("openURL");
+    if (typeof fallback?.openURL === "function") {
+      await fallback.openURL(url);
+      return;
+    }
+    throw new Error("No external browser API was found");
+  }
+
+  async function ensureAuthorization() {
+    if (stopped || connecting || authorizationToken()) return;
+    const userId = currentUserId();
+    if (!userId || typeof originalSafeFetch !== "function") {
+      scheduleRetry();
+      return;
+    }
+
+    connecting = true;
+    clearTimeout(retryTimer);
+    try {
+      const startResponse = await originalSafeFetch(`${AUTHORIZED_API_ORIGIN}/api/client-connect/start`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId, client: "Revenge" }),
+        cache: "no-store"
+      });
+      const start = await startResponse.json();
+      if (!startResponse.ok) throw new Error(start?.error || `HTTP ${startResponse.status}`);
+      if (!start?.deviceCode || !start?.pollSecret || !start?.authorizeUrl) {
+        throw new Error("Jadges returned an incomplete authorization request");
+      }
+
+      await openAuthorizationPage(start.authorizeUrl);
+      const interval = Math.max(1000, Math.min(5000, Number(start.intervalMs) || 2000));
+      const deadline = Date.parse(start.expiresAt || "") || Date.now() + 10 * 60 * 1000;
+
+      while (!stopped && Date.now() < deadline) {
+        await wait(interval);
+        const pollResponse = await originalSafeFetch(`${AUTHORIZED_API_ORIGIN}/api/client-connect/poll`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            deviceCode: start.deviceCode,
+            pollSecret: start.pollSecret
+          }),
+          cache: "no-store"
+        });
+        const poll = await pollResponse.json().catch(() => ({}));
+        if (pollResponse.status === 202 || pollResponse.status === 429) continue;
+        if (!pollResponse.ok) throw new Error(poll?.error || `HTTP ${pollResponse.status}`);
+        if (poll?.status === "authorized" && typeof poll.token === "string" && poll.token.startsWith("jdg_")) {
+          saveAuthorizationToken(poll.token);
+          vendetta.logger.log("[JadgesLoader] Authorization connected automatically");
+          return;
+        }
+      }
+
+      throw new Error("Automatic Jadges authorization expired");
+    } catch (error) {
+      vendetta.logger.warn("[JadgesLoader] Automatic authorization failed", error);
+      scheduleRetry();
+    } finally {
+      connecting = false;
+    }
+  }
+
   function installAuthorizedFetch() {
     if (originalSafeFetch) return;
     originalSafeFetch = vendetta.utils.safeFetch;
@@ -74,10 +171,21 @@
         }
       }
 
-      const headers = new Headers(options?.headers || {});
       const token = authorizationToken();
-      if (token) headers.set("authorization", `Bearer ${token}`);
-      return originalSafeFetch(input, { ...options, body, headers }, timeout);
+      if (!token) {
+        void ensureAuthorization();
+        return skippedResponse();
+      }
+
+      const headers = new Headers(options?.headers || {});
+      headers.set("authorization", `Bearer ${token}`);
+      const response = await originalSafeFetch(input, { ...options, body, headers }, timeout);
+      if (response.status === 401) {
+        clearAuthorizationToken();
+        void ensureAuthorization();
+        return skippedResponse();
+      }
+      return response;
     };
   }
 
@@ -98,7 +206,9 @@
   }
 
   async function onLoad() {
+    stopped = false;
     installAuthorizedFetch();
+    void ensureAuthorization();
     for (const url of SOURCES) {
       try {
         const plugin = await loadPlugin(url);
@@ -111,6 +221,9 @@
   }
 
   async function onUnload() {
+    stopped = true;
+    connecting = false;
+    clearTimeout(retryTimer);
     for (const plugin of loadedPlugins.splice(0).reverse()) {
       try {
         await plugin.onUnload?.();
@@ -121,54 +234,5 @@
     restoreAuthorizedFetch();
   }
 
-  function settings() {
-    const React = vendetta.metro.common.React;
-    const ReactNative = vendetta.metro.common.ReactNative;
-    const [token, setToken] = React.useState(authorizationToken());
-    const [saved, setSaved] = React.useState(false);
-
-    const save = () => {
-      vendetta.plugin.storage.authorizationToken = String(token || "").trim();
-      setSaved(true);
-      setTimeout(() => setSaved(false), 1600);
-    };
-
-    return React.createElement(
-      ReactNative.ScrollView,
-      { contentContainerStyle: { padding: 16, gap: 12 } },
-      React.createElement(ReactNative.Text, { style: { fontSize: 18, fontWeight: "700", color: "white" } }, "Jadges authorization"),
-      React.createElement(ReactNative.Text, { style: { color: "#aeb3c2", lineHeight: 20 } }, "Generate a plugin token in the Jadges website dashboard, paste it below, and save."),
-      React.createElement(ReactNative.TextInput, {
-        value: token,
-        onChangeText: setToken,
-        autoCapitalize: "none",
-        autoCorrect: false,
-        placeholder: "jdg_…",
-        placeholderTextColor: "#72788a",
-        style: {
-          minHeight: 48,
-          paddingHorizontal: 12,
-          borderRadius: 10,
-          backgroundColor: "#20232b",
-          color: "white"
-        }
-      }),
-      React.createElement(
-        ReactNative.Pressable,
-        {
-          onPress: save,
-          style: {
-            minHeight: 44,
-            alignItems: "center",
-            justifyContent: "center",
-            borderRadius: 10,
-            backgroundColor: "#5865f2"
-          }
-        },
-        React.createElement(ReactNative.Text, { style: { color: "white", fontWeight: "700" } }, saved ? "Saved" : "Save token")
-      )
-    );
-  }
-
-  return { onLoad, onUnload, settings };
+  return { onLoad, onUnload };
 })()
