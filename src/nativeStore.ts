@@ -54,19 +54,49 @@ function removeKeys(user: NativeStoreUser, keys: Set<string>): void {
   }
 }
 
+function replaceNativeBadges(
+  user: NativeStoreUser,
+  badges: NativeBadgeObservation[],
+): void {
+  const next = [...new Map(
+    badges
+      .filter(isAllowedNativeBadge)
+      .slice(0, 25)
+      .map((badge) => [badge.key, badge]),
+  ).values()];
+  const nextKeys = new Set(next.map((badge) => badge.key));
+  const removedKeys = new Set(
+    (user.nativeBadges || [])
+      .map((badge) => badge.key)
+      .filter((key) => !nextKeys.has(key)),
+  );
+
+  user.nativeBadges = next;
+  if (next.length === 0) delete user.nativeBadges;
+  removeKeys(user, removedKeys);
+}
+
 export async function setObservedNativeBadges(
   userId: string,
   badges: NativeBadgeObservation[],
+  authoritative = false,
 ): Promise<void> {
   await mutateStore((data) => {
     const user = getOrCreateUser(data, userId) as NativeStoreUser;
+
+    if (authoritative) {
+      replaceNativeBadges(user, badges);
+      return;
+    }
+
     const merged = new Map<string, NativeBadgeObservation>();
     const removedBotKeys = new Set<string>();
     const now = Date.now();
     const orderedKeys = new Set(user.badgeOrder || []);
 
-    // Keep previously detected user badges when Discord briefly renders only
-    // part of the profile row, but permanently discard bot/application badges.
+    // Compatibility path for older clients. Keep previously detected user
+    // badges when Discord briefly renders only part of the profile row, but
+    // permanently discard known bot/application badges.
     for (const badge of user.nativeBadges || []) {
       if (!isAllowedNativeBadge(badge)) {
         removedBotKeys.add(badge.key);
@@ -93,8 +123,5 @@ export async function setObservedNativeBadges(
     user.nativeBadges = [...merged.values()].slice(0, 25);
     if (user.nativeBadges.length === 0) delete user.nativeBadges;
     removeKeys(user, removedBotKeys);
-
-    // Do not remove other saved native order keys because a partial Discord
-    // render is not proof that a real account badge was removed.
   });
 }
