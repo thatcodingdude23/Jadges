@@ -27,14 +27,15 @@ let javascript: Buffer | undefined;
 
 async function combinedCss(): Promise<Buffer> {
   if (css) return css;
-  const [base, appearance, visibility, deletion] = await Promise.all([
+  const [base, appearance, visibility, deletion, categories] = await Promise.all([
     readFile(new URL("../web/jadges.css", import.meta.url), "utf8"),
     readFile(new URL("../web/jadges-theme.css", import.meta.url), "utf8"),
     readFile(new URL("../web/jadges-visibility.css", import.meta.url), "utf8"),
     readFile(new URL("../web/jadges-delete.css", import.meta.url), "utf8"),
+    readFile(new URL("../web/jadges-categories.css", import.meta.url), "utf8"),
   ]);
   css = Buffer.from(
-    `${base}\n${BRAND_CSS}\n${appearance}\n${visibility}\n${deletion}`,
+    `${base}\n${BRAND_CSS}\n${appearance}\n${visibility}\n${deletion}\n${categories}`,
     "utf8",
   );
   return css;
