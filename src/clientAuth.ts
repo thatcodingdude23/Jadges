@@ -1,5 +1,6 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
+import { config } from "./config.js";
 import { getOrCreateUser, mutateStore, readStore } from "./store.js";
 import type { UserRecord } from "./types.js";
 
@@ -8,9 +9,11 @@ const CLIENT_TOKEN_LIFETIME_MS = 90 * 24 * 60 * 60 * 1000;
 const CLIENT_TOKEN_PATTERN = /^jdg_[A-Za-z0-9_-]{40,120}$/;
 
 export interface ClientAuthorizedUser extends UserRecord {
-  clientReportTokenHash?: string;
+  clientReportTokenVersion?: number;
   clientReportTokenCreatedAt?: string;
   clientReportTokenExpiresAt?: string;
+  // Removed legacy field. It is kept here only so old stores can be cleaned.
+  clientReportTokenHash?: string;
 }
 
 export interface ClientTokenStatus {
@@ -19,8 +22,16 @@ export interface ClientTokenStatus {
   expiresAt?: string;
 }
 
-function tokenHash(token: string): string {
-  return createHash("sha256").update(token, "utf8").digest("base64url");
+function tokenVersion(user: ClientAuthorizedUser | undefined): number {
+  const value = Number(user?.clientReportTokenVersion);
+  return Number.isSafeInteger(value) && value > 0 ? value : 0;
+}
+
+function derivedToken(userId: string, version: number): string {
+  const digest = createHmac("sha256", config.webSessionSecret)
+    .update(`jadges-client-report:${userId}:${version}`, "utf8")
+    .digest("base64url");
+  return `${CLIENT_TOKEN_PREFIX}${digest}`;
 }
 
 function bearerToken(request: IncomingMessage): string | undefined {
@@ -38,61 +49,80 @@ function constantTimeEqual(left: string, right: string): boolean {
     && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
+function isActive(user: ClientAuthorizedUser | undefined): boolean {
+  const expiresAt = Date.parse(user?.clientReportTokenExpiresAt || "");
+  return tokenVersion(user) > 0
+    && Number.isFinite(expiresAt)
+    && expiresAt > Date.now();
+}
+
 export async function verifyClientAuthorization(
   request: IncomingMessage,
   userId: string,
 ): Promise<boolean> {
-  const token = bearerToken(request);
-  if (!token) return false;
+  const supplied = bearerToken(request);
+  if (!supplied) return false;
 
   const data = await readStore();
   const user = data.users[userId] as ClientAuthorizedUser | undefined;
-  const expectedHash = user?.clientReportTokenHash;
-  const expiresAt = Date.parse(user?.clientReportTokenExpiresAt || "");
-  if (!expectedHash || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
-    return false;
-  }
+  if (!isActive(user)) return false;
 
-  return constantTimeEqual(tokenHash(token), expectedHash);
+  return constantTimeEqual(
+    supplied,
+    derivedToken(userId, tokenVersion(user)),
+  );
 }
 
 export async function issueClientToken(
   userId: string,
+  options: { rotate?: boolean } = {},
 ): Promise<{ token: string; createdAt: string; expiresAt: string }> {
-  const token = `${CLIENT_TOKEN_PREFIX}${randomBytes(36).toString("base64url")}`;
-  const createdAt = new Date().toISOString();
-  const expiresAt = new Date(Date.now() + CLIENT_TOKEN_LIFETIME_MS).toISOString();
-  const hash = tokenHash(token);
+  let version = 0;
+  let createdAt = "";
+  let expiresAt = "";
 
   await mutateStore((data) => {
     const user = getOrCreateUser(data, userId) as ClientAuthorizedUser;
-    user.clientReportTokenHash = hash;
+    const currentVersion = tokenVersion(user);
+
+    if (!options.rotate && isActive(user)) {
+      version = currentVersion;
+      createdAt = user.clientReportTokenCreatedAt || new Date().toISOString();
+      expiresAt = user.clientReportTokenExpiresAt!;
+      return;
+    }
+
+    version = currentVersion + 1;
+    createdAt = new Date().toISOString();
+    expiresAt = new Date(Date.now() + CLIENT_TOKEN_LIFETIME_MS).toISOString();
+    user.clientReportTokenVersion = version;
     user.clientReportTokenCreatedAt = createdAt;
     user.clientReportTokenExpiresAt = expiresAt;
+    delete user.clientReportTokenHash;
   });
 
-  return { token, createdAt, expiresAt };
+  return {
+    token: derivedToken(userId, version),
+    createdAt,
+    expiresAt,
+  };
 }
 
 export async function revokeClientToken(userId: string): Promise<void> {
   await mutateStore((data) => {
     const user = data.users[userId] as ClientAuthorizedUser | undefined;
     if (!user) return;
-    delete user.clientReportTokenHash;
+    user.clientReportTokenVersion = tokenVersion(user) + 1;
     delete user.clientReportTokenCreatedAt;
     delete user.clientReportTokenExpiresAt;
+    delete user.clientReportTokenHash;
   });
 }
 
 export async function getClientTokenStatus(userId: string): Promise<ClientTokenStatus> {
   const data = await readStore();
   const user = data.users[userId] as ClientAuthorizedUser | undefined;
-  const expiresAt = Date.parse(user?.clientReportTokenExpiresAt || "");
-  const configured = Boolean(
-    user?.clientReportTokenHash
-      && Number.isFinite(expiresAt)
-      && expiresAt > Date.now(),
-  );
+  const configured = isActive(user);
 
   return {
     configured,
