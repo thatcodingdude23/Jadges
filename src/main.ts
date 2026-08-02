@@ -6,6 +6,7 @@ import { installDesktopThemeIntegration } from "./desktopThemeIntegration.js";
 import { startDiscordBot } from "./discord.js";
 import { installFinalAssetIntegration } from "./finalAssetIntegration.js";
 import { installHiddenDashboardIntegration } from "./hiddenDashboardIntegration.js";
+import { installNativeInventoryIntegration } from "./nativeInventoryIntegration.js";
 import { installPreviewIntegration } from "./previewIntegration.js";
 import { installProfileVisibilityReportIntegration } from "./profileVisibilityReportIntegration.js";
 import { installRearrangeSecurity } from "./rearrangeSecurity.js";
@@ -16,6 +17,7 @@ import { installWebsiteIntegration } from "./websiteIntegration.js";
 
 await mkdir(config.imagesDir, { recursive: true });
 installFinalAssetIntegration();
+installNativeInventoryIntegration();
 installBadgeDeleteIntegration();
 installHiddenDashboardIntegration();
 installVisibilityIntegration();
