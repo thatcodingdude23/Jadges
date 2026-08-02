@@ -46,6 +46,16 @@
   function patchCards() {
     for (const card of grid.querySelectorAll(".badge-card")) {
       if (!(card instanceof HTMLElement)) continue;
+      if (card.dataset.manageable === "false") {
+        card.classList.remove("badge-card-hidden");
+        card.removeAttribute("role");
+        card.removeAttribute("tabindex");
+        card.removeAttribute("aria-pressed");
+        card.removeAttribute("aria-label");
+        card.querySelector(".badge-hidden-overlay")?.remove();
+        continue;
+      }
+
       const key = cardKey(card);
       if (!key) continue;
       const isHidden = hidden.has(key);
@@ -133,6 +143,7 @@
   }
 
   function toggleCard(card) {
+    if (card.dataset.manageable === "false") return;
     const key = cardKey(card);
     if (!key) return;
     const previous = new Set(hidden);
@@ -166,14 +177,18 @@
     if (!(target instanceof Element)) return;
     if (target.closest(".badge-move, .badge-grip, button, a")) return;
     const card = target.closest(".badge-card");
-    if (!(card instanceof HTMLElement)) return;
+    if (!(card instanceof HTMLElement) || card.dataset.manageable === "false") return;
     toggleCard(card);
   });
 
   grid.addEventListener("keydown", (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     const target = event.target;
-    if (!(target instanceof HTMLElement) || !target.classList.contains("badge-card")) return;
+    if (
+      !(target instanceof HTMLElement)
+      || !target.classList.contains("badge-card")
+      || target.dataset.manageable === "false"
+    ) return;
     event.preventDefault();
     toggleCard(target);
   });
