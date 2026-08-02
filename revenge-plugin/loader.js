@@ -6,10 +6,11 @@
     "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/theme.js",
     "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/visibility.js"
   ];
-  const PROTECTED_PATHS = [
+  const AUTHORIZED_API_ORIGIN = "https://jadges.onrender.com";
+  const PROTECTED_PATHS = new Set([
     "/api/native-badges",
     "/api/profile-visible-badges"
-  ];
+  ]);
 
   const loadedPlugins = [];
   let originalSafeFetch;
@@ -26,6 +27,17 @@
 
   function authorizationToken() {
     return String(vendetta.plugin?.storage?.authorizationToken || "").trim();
+  }
+
+  function protectedPath(value) {
+    try {
+      const url = new URL(value);
+      return url.origin === AUTHORIZED_API_ORIGIN && PROTECTED_PATHS.has(url.pathname)
+        ? url.pathname
+        : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   function skippedResponse() {
@@ -46,9 +58,8 @@
 
     vendetta.utils.safeFetch = async (input, options = {}, timeout) => {
       const url = typeof input === "string" ? input : String(input?.url || input);
-      if (!PROTECTED_PATHS.some(path => url.includes(path))) {
-        return originalSafeFetch(input, options, timeout);
-      }
+      const reportPath = protectedPath(url);
+      if (!reportPath) return originalSafeFetch(input, options, timeout);
 
       let body = options?.body;
       if (typeof body === "string") {
@@ -56,7 +67,7 @@
           const payload = JSON.parse(body);
           const current = currentUserId();
           if (!current || payload?.userId !== current) return skippedResponse();
-          if (url.includes("/api/native-badges")) payload.authoritative = true;
+          if (reportPath === "/api/native-badges") payload.authoritative = true;
           body = JSON.stringify(payload);
         } catch {
           return skippedResponse();
