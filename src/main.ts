@@ -32,8 +32,10 @@ installDesktopThemeIntegration();
 installPreviewIntegration();
 installBrandIntegration();
 installWebsiteIntegration();
-installPresetMarketplaceIntegration();
+// Install moderation first so its request wrapper is outermost and can intercept
+// preset uploads before the marketplace publishes them.
 installPresetModerationWebsite();
+installPresetMarketplaceIntegration();
 installRearrangeSecurity();
 const server = startServer();
 const client = await startDiscordBot();
