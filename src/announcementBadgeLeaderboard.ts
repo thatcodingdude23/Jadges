@@ -1,10 +1,9 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
 import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonInteraction,
   ButtonStyle,
+  ChannelType,
   Client,
   EmbedBuilder,
   Events,
@@ -12,15 +11,13 @@ import {
   Interaction,
   Message,
   MessageFlags,
-  TextChannel,
   escapeMarkdown,
+  type GuildTextBasedChannel,
 } from "discord.js";
-import { config } from "./config.js";
 import { readStore } from "./store.js";
 import type { UserRecord } from "./types.js";
 
 const LEADERBOARD_CHANNEL_ID = "1533349869631181032";
-const LEADERBOARD_FILE = path.join(config.dataDir, "badge-leaderboard.json");
 const UPDATE_INTERVAL_MS = 60_000;
 const USERS_PER_PAGE = 5;
 const NAME_CACHE_MS = 10 * 60_000;
@@ -44,11 +41,6 @@ interface CachedName extends ResolvedName {
   expiresAt: number;
 }
 
-interface LeaderboardStateFile {
-  channelId: string;
-  messageId?: string;
-}
-
 export interface BadgeLeaderboardHandle {
   stop(): void;
 }
@@ -56,16 +48,16 @@ export interface BadgeLeaderboardHandle {
 const nameCache = new Map<string, CachedName>();
 
 function activeBadgeCount(user: UserRecord): number {
-  const customBadges = user.badges.filter((badge) => !badge.pending).length;
-  const visibleNitro = Boolean(
+  const approvedCustomBadges = user.badges.filter((badge) => !badge.pending).length;
+  const equippedNitro = Boolean(
     user.nitro &&
     !user.nitro.pending &&
     user.nitro.preset !== "remove",
   );
-  return customBadges + (visibleNitro ? 1 : 0);
+  return approvedCustomBadges + (equippedNitro ? 1 : 0);
 }
 
-async function leaderboardEntries(): Promise<LeaderboardEntry[]> {
+async function getLeaderboardEntries(): Promise<LeaderboardEntry[]> {
   const data = await readStore();
   return Object.entries(data.users)
     .map(([userId, user]) => ({
@@ -151,27 +143,28 @@ async function buildPage(
     const name = names[index]!;
     const username = escapeMarkdown(name.username);
     const displayName = escapeMarkdown(name.displayName);
-    const badgeLabel = entry.badgeCount === 1 ? "badge" : "badges";
+    const badgeWord = entry.badgeCount === 1 ? "badge" : "badges";
+
     return [
       `${rankMarker(rank)} **@${username}**  •  ${displayName}`,
-      `> ✦ **${entry.badgeCount.toLocaleString()} ${badgeLabel}**`,
+      `> ✦ **${entry.badgeCount.toLocaleString()} ${badgeWord}**`,
     ].join("\n");
   });
 
   const description = lines.length
     ? [
-        "The collectors with the most approved Jadges badges.",
+        "Celebrating the collectors with the largest approved Jadges collections.",
         "",
         lines.join("\n\n"),
       ].join("\n")
-    : "No approved Jadges badges have been collected yet. This leaderboard will update automatically when the first badge is approved.";
+    : "No approved Jadges badges have been collected yet. The leaderboard will update automatically when the first badge is approved.";
 
   const embed = new EmbedBuilder()
     .setColor(0x8b5cf6)
-    .setTitle("🏆 Jadges Most Badges Leaderboard")
+    .setTitle("🏆 Jadges Badge Collectors Leaderboard")
     .setDescription(description)
     .setFooter({
-      text: `${FOOTER_PREFIX} • Page ${page + 1}/${totalPages} • Refreshes every 60 seconds`,
+      text: `${FOOTER_PREFIX} • Page ${page + 1}/${totalPages} • Updates every 60 seconds`,
     })
     .setTimestamp();
 
@@ -181,51 +174,38 @@ async function buildPage(
   return { embed, row: navigationRow(page) };
 }
 
-async function leaderboardChannel(client: Client): Promise<TextChannel> {
+async function leaderboardChannel(client: Client): Promise<GuildTextBasedChannel> {
   const channel = await client.channels.fetch(LEADERBOARD_CHANNEL_ID);
-  if (!(channel instanceof TextChannel)) {
-    throw new Error("The Jadges leaderboard channel must be a text channel");
-  }
-  return channel;
-}
+  const isSupportedType =
+    channel?.type === ChannelType.GuildText ||
+    channel?.type === ChannelType.GuildAnnouncement;
 
-async function loadState(): Promise<LeaderboardStateFile> {
-  try {
-    const raw = await readFile(LEADERBOARD_FILE, "utf8");
-    const parsed = JSON.parse(raw) as Partial<LeaderboardStateFile>;
-    if (parsed.channelId !== LEADERBOARD_CHANNEL_ID) {
-      return { channelId: LEADERBOARD_CHANNEL_ID };
-    }
-    return {
-      channelId: LEADERBOARD_CHANNEL_ID,
-      messageId: typeof parsed.messageId === "string" ? parsed.messageId : undefined,
-    };
-  } catch {
-    return { channelId: LEADERBOARD_CHANNEL_ID };
+  if (
+    !channel ||
+    !isSupportedType ||
+    !channel.isTextBased() ||
+    channel.isDMBased() ||
+    !channel.isSendable()
+  ) {
+    throw new Error(
+      "The Jadges leaderboard channel must be a sendable text or announcement channel",
+    );
   }
-}
 
-async function saveState(messageId: string): Promise<void> {
-  await mkdir(config.dataDir, { recursive: true });
-  await writeFile(
-    LEADERBOARD_FILE,
-    `${JSON.stringify({
-      channelId: LEADERBOARD_CHANNEL_ID,
-      messageId,
-    }, null, 2)}\n`,
-    "utf8",
-  );
+  return channel as GuildTextBasedChannel;
 }
 
 async function findExistingMessage(
-  channel: TextChannel,
+  channel: GuildTextBasedChannel,
   botUserId: string,
 ): Promise<Message | undefined> {
   try {
     const messages = await channel.messages.fetch({ limit: 50 });
     return messages.find((message) =>
       message.author.id === botUserId &&
-      message.embeds.some((embed) => embed.footer?.text?.startsWith(FOOTER_PREFIX))
+      message.embeds.some((embed) =>
+        embed.footer?.text?.startsWith(FOOTER_PREFIX)
+      )
     );
   } catch (error) {
     console.warn("Could not search for an existing Jadges leaderboard message:", error);
@@ -233,27 +213,12 @@ async function findExistingMessage(
   }
 }
 
-async function existingMessage(
-  channel: TextChannel,
-  botUserId: string,
-): Promise<Message | undefined> {
-  const state = await loadState();
-  if (state.messageId) {
-    try {
-      return await channel.messages.fetch(state.messageId);
-    } catch {
-      // The saved message was deleted or is no longer accessible.
-    }
-  }
-  return findExistingMessage(channel, botUserId);
-}
-
 async function publishLeaderboard(client: Client): Promise<void> {
   const botUser = client.user;
   if (!botUser) throw new Error("Discord bot user is not ready");
 
   const channel = await leaderboardChannel(client);
-  const entries = await leaderboardEntries();
+  const entries = await getLeaderboardEntries();
   const { embed, row } = await buildPage(client, channel.guild, entries, 0);
   const payload = {
     content: "",
@@ -262,15 +227,12 @@ async function publishLeaderboard(client: Client): Promise<void> {
     allowedMentions: { parse: [] },
   };
 
-  const message = await existingMessage(channel, botUser.id);
-  if (message) {
-    await message.edit(payload);
-    await saveState(message.id);
-    return;
+  const existing = await findExistingMessage(channel, botUser.id);
+  if (existing) {
+    await existing.edit(payload);
+  } else {
+    await channel.send(payload);
   }
-
-  const created = await channel.send(payload);
-  await saveState(created.id);
 }
 
 function requestedPage(
@@ -278,36 +240,38 @@ function requestedPage(
 ): { direction: "previous" | "next"; currentPage: number } | undefined {
   const match = new RegExp(`^${BUTTON_PREFIX}:(previous|next):(\\d+)$`).exec(customId);
   if (!match) return undefined;
+
   const currentPage = Number(match[2]);
   if (!Number.isSafeInteger(currentPage) || currentPage < 0) return undefined;
+
   return {
     direction: match[1] as "previous" | "next",
     currentPage,
   };
 }
 
-export async function handleBadgeLeaderboardButton(
+async function handleButton(
   client: Client,
   interaction: ButtonInteraction,
 ): Promise<boolean> {
   const request = requestedPage(interaction.customId);
   if (!request) return false;
 
-  const entries = await leaderboardEntries();
+  const entries = await getLeaderboardEntries();
   const totalPages = Math.max(1, Math.ceil(entries.length / USERS_PER_PAGE));
-  const nextPage = request.currentPage + (request.direction === "next" ? 1 : -1);
+  const targetPage = request.currentPage + (request.direction === "next" ? 1 : -1);
 
-  if (nextPage < 0) {
+  if (targetPage < 0) {
     await interaction.reply({
-      content: "You are already at the beginning of the leaderboard.",
+      content: "You are already viewing the first leaderboard page.",
       flags: MessageFlags.Ephemeral,
     });
     return true;
   }
 
-  if (nextPage >= totalPages) {
+  if (targetPage >= totalPages) {
     await interaction.reply({
-      content: "You have reached the end of the leaderboard — there are no more users to show after this page.",
+      content: "You have reached the end of the leaderboard — there are no more collectors to display after this page.",
       flags: MessageFlags.Ephemeral,
     });
     return true;
@@ -318,7 +282,7 @@ export async function handleBadgeLeaderboardButton(
     client,
     channel.guild,
     entries,
-    nextPage,
+    targetPage,
   );
   const payload = {
     embeds: [embed],
@@ -334,10 +298,13 @@ export async function handleBadgeLeaderboardButton(
       flags: MessageFlags.Ephemeral,
     });
   }
+
   return true;
 }
 
-export function startBadgeLeaderboard(client: Client): BadgeLeaderboardHandle {
+export function startAnnouncementBadgeLeaderboard(
+  client: Client,
+): BadgeLeaderboardHandle {
   let stopped = false;
   let started = false;
   let timer: NodeJS.Timeout | undefined;
@@ -360,9 +327,9 @@ export function startBadgeLeaderboard(client: Client): BadgeLeaderboardHandle {
       });
   };
 
-  const handleInteraction = (interaction: Interaction): void => {
+  const onInteraction = (interaction: Interaction): void => {
     if (!interaction.isButton()) return;
-    void handleBadgeLeaderboardButton(client, interaction).catch(async (error) => {
+    void handleButton(client, interaction).catch(async (error) => {
       console.error("Jadges leaderboard interaction failed:", error);
       if (!interaction.replied && !interaction.deferred) {
         await interaction.reply({
@@ -381,14 +348,14 @@ export function startBadgeLeaderboard(client: Client): BadgeLeaderboardHandle {
     timer.unref();
   };
 
-  client.on(Events.InteractionCreate, handleInteraction);
+  client.on(Events.InteractionCreate, onInteraction);
   if (client.isReady()) begin();
   else client.once(Events.ClientReady, begin);
 
   return {
     stop(): void {
       stopped = true;
-      client.off(Events.InteractionCreate, handleInteraction);
+      client.off(Events.InteractionCreate, onInteraction);
       if (timer) clearInterval(timer);
       timer = undefined;
     },
