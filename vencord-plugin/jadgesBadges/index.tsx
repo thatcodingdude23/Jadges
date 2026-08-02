@@ -5,15 +5,9 @@
  */
 
 import definePlugin from "@utils/types";
+import { UserStore } from "@webpack/common";
 
 import basePlugin from "./base";
-import {
-    clientAuthorizationToken,
-    ensureClientAuthorization,
-    invalidateClientAuthorization,
-    startClientAuthorization,
-    stopClientAuthorization
-} from "./clientConnection";
 import {
     startNativeInventorySync,
     stopNativeInventorySync
@@ -28,6 +22,7 @@ import { startVisibilitySync, stopVisibilitySync } from "./visibilitySync";
 
 const BADGE_QUERY = 'img[class*="badge"], img.jadges-profile-badge-image';
 const AUTHORIZED_API_ORIGIN = "https://jadges.onrender.com";
+const AUTH_STORAGE_KEY = "jadges.clientAuthorizationToken";
 const PROTECTED_REPORT_PATHS = new Set([
     "/api/native-badges",
     "/api/profile-visible-badges"
@@ -42,10 +37,29 @@ interface NativeReportDecision {
     init?: RequestInit;
 }
 
+interface ConnectionStart {
+    deviceCode?: string;
+    pollSecret?: string;
+    authorizeUrl?: string;
+    expiresAt?: string;
+    intervalMs?: number;
+    error?: string;
+}
+
+interface ConnectionPoll {
+    status?: string;
+    token?: string;
+    error?: string;
+}
+
 let originalFetch: FetchFunction | undefined;
 let originalQuerySelectorAll: QuerySelectorAll | undefined;
 let fetchInstalled = false;
 let queryFilterInstalled = false;
+let authConnecting = false;
+let authStopped = false;
+let authAbortController: AbortController | undefined;
+let authRetryTimer: ReturnType<typeof setTimeout> | undefined;
 
 function requestUrl(input: RequestInfo | URL): string {
     if (typeof input === "string") return input;
@@ -70,6 +84,151 @@ function ignoredResponse(): Response {
         status: 202,
         headers: { "content-type": "application/json; charset=utf-8" }
     });
+}
+
+function authorizationToken(): string {
+    try {
+        return String(localStorage.getItem(AUTH_STORAGE_KEY) || "").trim();
+    } catch {
+        return "";
+    }
+}
+
+function saveAuthorizationToken(token: string): void {
+    try {
+        localStorage.setItem(AUTH_STORAGE_KEY, token);
+    } catch (error) {
+        console.warn("[JadgesBadges] Could not save authorization:", error);
+    }
+}
+
+function clearAuthorizationToken(): void {
+    try {
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+    } catch {}
+}
+
+function scheduleAuthorizationRetry(): void {
+    if (authStopped) return;
+    clearTimeout(authRetryTimer);
+    authRetryTimer = setTimeout(() => void ensureAuthorization(), 8_000);
+}
+
+function openAuthorizationPage(url: string): void {
+    const popup = window.open(url, "_blank", "noopener,noreferrer");
+    if (popup) return;
+
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.target = "_blank";
+    anchor.rel = "noopener noreferrer";
+    anchor.style.display = "none";
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+}
+
+function wait(milliseconds: number, signal: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, milliseconds);
+        signal.addEventListener("abort", () => {
+            clearTimeout(timer);
+            reject(new DOMException("Aborted", "AbortError"));
+        }, { once: true });
+    });
+}
+
+async function runAuthorization(userId: string, signal: AbortSignal): Promise<void> {
+    const startResponse = await fetch(`${AUTHORIZED_API_ORIGIN}/api/client-connect/start`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId, client: "Vencord" }),
+        cache: "no-store",
+        credentials: "omit",
+        signal
+    });
+    const start = await startResponse.json().catch(() => ({})) as ConnectionStart;
+    if (!startResponse.ok) {
+        throw new Error(start.error || `Jadges connection returned HTTP ${startResponse.status}`);
+    }
+    if (!start.deviceCode || !start.pollSecret || !start.authorizeUrl) {
+        throw new Error("Jadges returned an incomplete connection request");
+    }
+
+    openAuthorizationPage(start.authorizeUrl);
+    const interval = Math.max(1_000, Math.min(5_000, Number(start.intervalMs) || 2_000));
+    const deadline = Date.parse(start.expiresAt || "") || Date.now() + 10 * 60_000;
+
+    while (!signal.aborted && Date.now() < deadline) {
+        await wait(interval, signal);
+        const pollResponse = await fetch(`${AUTHORIZED_API_ORIGIN}/api/client-connect/poll`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                deviceCode: start.deviceCode,
+                pollSecret: start.pollSecret
+            }),
+            cache: "no-store",
+            credentials: "omit",
+            signal
+        });
+        const poll = await pollResponse.json().catch(() => ({})) as ConnectionPoll;
+        if (pollResponse.status === 202 || pollResponse.status === 429) continue;
+        if (!pollResponse.ok) {
+            throw new Error(poll.error || `Jadges authorization returned HTTP ${pollResponse.status}`);
+        }
+        if (poll.status === "authorized" && typeof poll.token === "string" && poll.token.startsWith("jdg_")) {
+            saveAuthorizationToken(poll.token);
+            console.info("[JadgesBadges] Authorization connected automatically");
+            return;
+        }
+    }
+
+    throw new Error("Jadges authorization expired before it was completed");
+}
+
+async function ensureAuthorization(): Promise<void> {
+    if (authStopped || authConnecting || authorizationToken()) return;
+    const userId = UserStore.getCurrentUser()?.id;
+    if (!userId) {
+        scheduleAuthorizationRetry();
+        return;
+    }
+
+    authConnecting = true;
+    clearTimeout(authRetryTimer);
+    authAbortController?.abort();
+    authAbortController = new AbortController();
+
+    try {
+        await runAuthorization(userId, authAbortController.signal);
+    } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+            console.warn("[JadgesBadges] Automatic authorization failed:", error);
+            scheduleAuthorizationRetry();
+        }
+    } finally {
+        authConnecting = false;
+    }
+}
+
+function invalidateAuthorization(): void {
+    clearAuthorizationToken();
+    void ensureAuthorization();
+}
+
+function startAuthorization(): void {
+    authStopped = false;
+    void ensureAuthorization();
+}
+
+function stopAuthorization(): void {
+    authStopped = true;
+    authConnecting = false;
+    clearTimeout(authRetryTimer);
+    authRetryTimer = undefined;
+    authAbortController?.abort();
+    authAbortController = undefined;
 }
 
 function isOfficialDiscordBadgeImage(value: unknown): boolean {
@@ -137,10 +296,7 @@ function prepareNativeBadgeReport(init: RequestInit | undefined): NativeReportDe
     }
 }
 
-function withClientAuthorization(
-    init: RequestInit | undefined,
-    token: string
-): RequestInit {
+function withAuthorization(init: RequestInit | undefined, token: string): RequestInit {
     const headers = new Headers(init?.headers);
     headers.set("authorization", `Bearer ${token}`);
     return { ...(init || {}), headers };
@@ -181,17 +337,17 @@ function installFetchGuard(): void {
         }
 
         if (reportPath) {
-            const token = clientAuthorizationToken();
+            const token = authorizationToken();
             if (!token) {
-                void ensureClientAuthorization();
+                void ensureAuthorization();
                 return ignoredResponse();
             }
-            nextInit = withClientAuthorization(nextInit, token);
+            nextInit = withAuthorization(nextInit, token);
         }
 
         const response = await originalFetch!(input, nextInit);
         if (reportPath && response.status === 401) {
-            invalidateClientAuthorization();
+            invalidateAuthorization();
             return ignoredResponse();
         }
 
@@ -241,7 +397,7 @@ function restoreGuards(): void {
 async function startWithoutGlobalBadgeClick(): Promise<void> {
     installFetchGuard();
     installBadgeQueryFilter();
-    startClientAuthorization();
+    startAuthorization();
 
     const originalAdd = document.addEventListener.bind(document) as AddEventListener;
     let blockedCaptureClick = false;
@@ -275,7 +431,7 @@ export default definePlugin({
     start: startWithoutGlobalBadgeClick,
     stop() {
         try {
-            stopClientAuthorization();
+            stopAuthorization();
             stopNativeInventorySync();
             stopProfileVisibilityReporter();
             stopVisibilitySync();
