@@ -8,6 +8,10 @@ import definePlugin from "@utils/types";
 
 import basePlugin from "./base";
 import {
+    startNativeInventorySync,
+    stopNativeInventorySync
+} from "./nativeInventorySync";
+import {
     startProfileVisibilityReporter,
     stopProfileVisibilityReporter
 } from "./profileVisibilityReporter";
@@ -20,6 +24,11 @@ const BADGE_QUERY = 'img[class*="badge"], img.jadges-profile-badge-image';
 type FetchFunction = typeof globalThis.fetch;
 type QuerySelectorAll = typeof document.querySelectorAll;
 type AddEventListener = typeof document.addEventListener;
+
+interface NativeReportDecision {
+    skip: boolean;
+    init?: RequestInit;
+}
 
 let originalFetch: FetchFunction | undefined;
 let originalQuerySelectorAll: QuerySelectorAll | undefined;
@@ -52,31 +61,50 @@ function isOfficialDiscordBadgeImage(value: unknown): boolean {
     }
 }
 
-function cleanNativeBadgeReport(init: RequestInit | undefined): RequestInit | undefined {
-    if (!init || typeof init.body !== "string") return init;
+function prepareNativeBadgeReport(init: RequestInit | undefined): NativeReportDecision {
+    if (!init || typeof init.body !== "string") return { skip: true };
 
     try {
         const payload = JSON.parse(init.body) as {
             userId?: unknown;
+            authoritative?: unknown;
             badges?: Array<{ key?: unknown; name?: unknown; image?: unknown; }>;
         };
 
-        if (!Array.isArray(payload.badges)) return init;
+        // V.27 replaces the old DOM scanner. Only the authoritative inventory
+        // produced from Discord's UserProfileStore is allowed to reach Jadges.
+        if (
+            payload.authoritative !== true
+            || typeof payload.userId !== "string"
+            || !/^\d{15,22}$/.test(payload.userId)
+            || !Array.isArray(payload.badges)
+        ) {
+            return { skip: true };
+        }
 
         const badges = payload.badges.filter(badge =>
             badge
             && typeof badge.key === "string"
             && badge.key.startsWith("discord:")
+            && typeof badge.name === "string"
+            && badge.name.trim().length > 0
             && typeof badge.image === "string"
             && isOfficialDiscordBadgeImage(badge.image)
         );
 
         return {
-            ...init,
-            body: JSON.stringify({ ...payload, badges })
+            skip: false,
+            init: {
+                ...init,
+                body: JSON.stringify({
+                    userId: payload.userId,
+                    badges,
+                    authoritative: true
+                })
+            }
         };
     } catch {
-        return init;
+        return { skip: true };
     }
 }
 
@@ -105,9 +133,19 @@ function installFetchGuard(): void {
 
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = requestUrl(input);
-        const nextInit = url.includes("/api/native-badges")
-            ? cleanNativeBadgeReport(init)
-            : init;
+        let nextInit = init;
+
+        if (url.includes("/api/native-badges")) {
+            const decision = prepareNativeBadgeReport(init);
+            if (decision.skip) {
+                return new Response(JSON.stringify({ ok: true, ignored: true }), {
+                    status: 202,
+                    headers: { "content-type": "application/json; charset=utf-8" }
+                });
+            }
+            nextInit = decision.init;
+        }
+
         const response = await originalFetch!(input, nextInit);
 
         if (!url.includes("/settings.json") || !response.ok) return response;
@@ -174,6 +212,7 @@ async function startWithoutGlobalBadgeClick(): Promise<void> {
         startThemeSync();
         startVisibilitySync();
         startProfileVisibilityReporter();
+        startNativeInventorySync();
     } finally {
         document.addEventListener = originalAdd;
     }
@@ -188,6 +227,7 @@ export default definePlugin({
     start: startWithoutGlobalBadgeClick,
     stop() {
         try {
+            stopNativeInventorySync();
             stopProfileVisibilityReporter();
             stopVisibilitySync();
             stopThemeSync();
