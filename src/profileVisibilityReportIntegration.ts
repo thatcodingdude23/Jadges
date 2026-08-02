@@ -3,7 +3,6 @@ import http, {
   type RequestListener,
   type ServerResponse,
 } from "node:http";
-import { verifyClientAuthorization } from "./clientAuth.js";
 import { config } from "./config.js";
 import { getOrCreateUser, mutateStore } from "./store.js";
 import type { UserRecord } from "./types.js";
@@ -52,9 +51,8 @@ function sendJson(
     "cache-control": "no-store",
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "POST, OPTIONS",
-    "access-control-allow-headers": "content-type, authorization",
+    "access-control-allow-headers": "content-type",
     "x-content-type-options": "nosniff",
-    ...(status === 401 ? { "www-authenticate": "Bearer" } : {}),
   });
   response.end(JSON.stringify(body));
 }
@@ -67,7 +65,7 @@ async function handleReport(
     response.writeHead(204, {
       "access-control-allow-origin": "*",
       "access-control-allow-methods": "POST, OPTIONS",
-      "access-control-allow-headers": "content-type, authorization",
+      "access-control-allow-headers": "content-type",
       "access-control-max-age": "86400",
     });
     response.end();
@@ -87,12 +85,6 @@ async function handleReport(
     if (typeof body.userId !== "string" || !/^\d{15,22}$/.test(body.userId)) {
       throw new Error("Invalid Discord user ID");
     }
-
-    if (!await verifyClientAuthorization(request, body.userId)) {
-      sendJson(response, 401, { error: "A valid Jadges client authorization token is required" });
-      return;
-    }
-
     if (!Array.isArray(body.visibleKeys)) {
       throw new Error("Invalid visible badge list");
     }

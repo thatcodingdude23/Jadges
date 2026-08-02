@@ -27,16 +27,15 @@ let javascript: Buffer | undefined;
 
 async function combinedCss(): Promise<Buffer> {
   if (css) return css;
-  const [base, appearance, visibility, deletion, categories, clientAuth] = await Promise.all([
+  const [base, appearance, visibility, deletion, categories] = await Promise.all([
     readFile(new URL("../web/jadges.css", import.meta.url), "utf8"),
     readFile(new URL("../web/jadges-theme.css", import.meta.url), "utf8"),
     readFile(new URL("../web/jadges-visibility.css", import.meta.url), "utf8"),
     readFile(new URL("../web/jadges-delete.css", import.meta.url), "utf8"),
     readFile(new URL("../web/jadges-categories.css", import.meta.url), "utf8"),
-    readFile(new URL("../web/jadges-client-auth.css", import.meta.url), "utf8"),
   ]);
   css = Buffer.from(
-    `${base}\n${BRAND_CSS}\n${appearance}\n${visibility}\n${deletion}\n${categories}\n${clientAuth}`,
+    `${base}\n${BRAND_CSS}\n${appearance}\n${visibility}\n${deletion}\n${categories}`,
     "utf8",
   );
   return css;
@@ -44,16 +43,15 @@ async function combinedCss(): Promise<Buffer> {
 
 async function combinedJavascript(): Promise<Buffer> {
   if (javascript) return javascript;
-  const [dashboard, appearance, preview, visibility, deletion, clientAuth] = await Promise.all([
+  const [dashboard, appearance, preview, visibility, deletion] = await Promise.all([
     readFile(new URL("../web/jadges.js", import.meta.url), "utf8"),
     readFile(new URL("../web/jadges-theme.js", import.meta.url), "utf8"),
     readFile(new URL("../web/jadges-preview.js", import.meta.url), "utf8"),
     readFile(new URL("../web/jadges-visibility.js", import.meta.url), "utf8"),
     readFile(new URL("../web/jadges-delete.js", import.meta.url), "utf8"),
-    readFile(new URL("../web/jadges-client-auth.js", import.meta.url), "utf8"),
   ]);
   javascript = Buffer.from(
-    `${dashboard}\n${appearance}\n${preview}\n${visibility}\n${deletion}\n${clientAuth}`,
+    `${dashboard}\n${appearance}\n${preview}\n${visibility}\n${deletion}`,
     "utf8",
   );
   return javascript;
