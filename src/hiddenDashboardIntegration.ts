@@ -3,6 +3,7 @@ import http, {
   type RequestListener,
   type ServerResponse,
 } from "node:http";
+import { isBotOnlyNativeBadgeName } from "./nativeStore.js";
 import { readStore } from "./store.js";
 import type { NitroPreset, UserRecord } from "./types.js";
 
@@ -82,7 +83,6 @@ function detectedHiddenKeys(
       if (!visible.has(badge.key)) hidden.add(badge.key);
     }
   } else {
-    // Compatibility fallback until an updated client reports the real profile.
     const preset = activeNitroPreset(user);
     if (preset) hidden.add("discord:nitro");
     if (preset === "remove") hidden.add("discord:boosting");
@@ -100,6 +100,11 @@ function isDashboardData(value: unknown): value is DashboardDataLike {
   );
 }
 
+function isBotOnlyDashboardBadge(badge: DashboardBadgeLike): boolean {
+  return badge.key.startsWith("discord:")
+    && isBotOnlyNativeBadgeName(badge.name);
+}
+
 async function enrichDashboardData(value: unknown): Promise<unknown> {
   if (!isDashboardData(value)) return value;
   const userId = value.profile?.id;
@@ -109,13 +114,14 @@ async function enrichDashboardData(value: unknown): Promise<unknown> {
   const user = store.users[userId] as VisibilityUser | undefined;
   if (!user) return value;
 
-  const badges = Array.isArray(value.badges) ? [...value.badges] : [];
+  const badges = (Array.isArray(value.badges) ? [...value.badges] : [])
+    .filter((badge) => !isBotOnlyDashboardBadge(badge));
   const badgeKeys = new Set(badges.map((badge) => badge.key));
 
-  // Keep the full inventory in the editor. Visibility is represented by the
-  // red barrier, not by removing a card from the dashboard.
+  // Keep every real account badge in the editor, including ones currently
+  // hidden on the profile. Bot/application badges are intentionally excluded.
   for (const badge of user.nativeBadges || []) {
-    if (badgeKeys.has(badge.key)) continue;
+    if (isBotOnlyNativeBadgeName(badge.name) || badgeKeys.has(badge.key)) continue;
     badges.push({
       key: badge.key,
       name: badge.name,
