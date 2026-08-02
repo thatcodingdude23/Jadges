@@ -1,7 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { installBadgeDeleteIntegration } from "./badgeDeleteIntegration.js";
 import { installBrandIntegration } from "./brandIntegration.js";
-import { installClientTokenIntegration } from "./clientTokenIntegration.js";
 import { config } from "./config.js";
 import { installDesktopThemeIntegration } from "./desktopThemeIntegration.js";
 import { startDiscordBot } from "./discord.js";
@@ -18,7 +17,6 @@ import { installWebsiteIntegration } from "./websiteIntegration.js";
 
 await mkdir(config.imagesDir, { recursive: true });
 installFinalAssetIntegration();
-installClientTokenIntegration();
 installNativeInventoryIntegration();
 installBadgeDeleteIntegration();
 installHiddenDashboardIntegration();
