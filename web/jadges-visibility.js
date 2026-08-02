@@ -75,14 +75,11 @@
 
   function patchPreview() {
     if (!preview) return;
-    const cards = [...grid.querySelectorAll(".badge-card")]
-      .filter((card) => card instanceof HTMLElement);
     const items = [...preview.querySelectorAll(".preview-badge")]
       .filter((item) => item instanceof HTMLElement);
 
-    items.forEach((item, index) => {
-      const key = cardKey(cards[index]);
-      item.dataset.key = key;
+    items.forEach((item) => {
+      const key = item.dataset.key || "";
       item.hidden = Boolean(key && hidden.has(key));
     });
 
