@@ -1,0 +1,15 @@
+{
+  "name": "Jadges Badges for Kettu",
+  "description": "Displays and rearranges Jadges badges, synchronizes hidden badges, and applies the user's saved Jadges account theme in Kettu.",
+  "authors": [
+    {
+      "name": "Jaycord",
+      "id": "0"
+    }
+  ],
+  "main": "index.js",
+  "vendetta": {
+    "icon": "ic_badge_staff"
+  },
+  "hash": "ef2a324131c5e4f7829cfede0f0946c687bb7685a694c9afec5799dc2d2988c0"
+}
