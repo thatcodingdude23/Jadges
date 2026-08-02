@@ -9,6 +9,7 @@ import {
   EmbedBuilder,
   Events,
   Guild,
+  Interaction,
   Message,
   MessageFlags,
   TextChannel,
@@ -16,6 +17,7 @@ import {
 } from "discord.js";
 import { config } from "./config.js";
 import { readStore } from "./store.js";
+import type { UserRecord } from "./types.js";
 
 const LEADERBOARD_CHANNEL_ID = "1533349869631181032";
 const LEADERBOARD_FILE = path.join(config.dataDir, "badge-leaderboard.json");
@@ -53,7 +55,7 @@ export interface BadgeLeaderboardHandle {
 
 const nameCache = new Map<string, CachedName>();
 
-function activeBadgeCount(user: Awaited<ReturnType<typeof readStore>>["users"][string]): number {
+function activeBadgeCount(user: UserRecord): number {
   const customBadges = user.badges.filter((badge) => !badge.pending).length;
   const visibleNitro = Boolean(
     user.nitro &&
@@ -168,11 +170,13 @@ async function buildPage(
     .setColor(0x8b5cf6)
     .setTitle("🏆 Jadges Most Badges Leaderboard")
     .setDescription(description)
-    .setThumbnail(client.user?.displayAvatarURL({ size: 128 }) || null)
     .setFooter({
       text: `${FOOTER_PREFIX} • Page ${page + 1}/${totalPages} • Refreshes every 60 seconds`,
     })
     .setTimestamp();
+
+  const avatar = client.user?.displayAvatarURL({ size: 128 });
+  if (avatar) embed.setThumbnail(avatar);
 
   return { embed, row: navigationRow(page) };
 }
@@ -255,7 +259,7 @@ async function publishLeaderboard(client: Client): Promise<void> {
     content: "",
     embeds: [embed],
     components: [row],
-    allowedMentions: { parse: [] as never[] },
+    allowedMentions: { parse: [] },
   };
 
   const message = await existingMessage(channel, botUser.id);
@@ -319,7 +323,7 @@ export async function handleBadgeLeaderboardButton(
   const payload = {
     embeds: [embed],
     components: [row],
-    allowedMentions: { parse: [] as never[] },
+    allowedMentions: { parse: [] },
   };
 
   if (interaction.message.flags.has(MessageFlags.Ephemeral)) {
@@ -356,6 +360,19 @@ export function startBadgeLeaderboard(client: Client): BadgeLeaderboardHandle {
       });
   };
 
+  const handleInteraction = (interaction: Interaction): void => {
+    if (!interaction.isButton()) return;
+    void handleBadgeLeaderboardButton(client, interaction).catch(async (error) => {
+      console.error("Jadges leaderboard interaction failed:", error);
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({
+          content: "The leaderboard could not be loaded right now. Please try again in a moment.",
+          flags: MessageFlags.Ephemeral,
+        }).catch(() => undefined);
+      }
+    });
+  };
+
   const begin = (): void => {
     if (started || stopped) return;
     started = true;
@@ -364,12 +381,14 @@ export function startBadgeLeaderboard(client: Client): BadgeLeaderboardHandle {
     timer.unref();
   };
 
+  client.on(Events.InteractionCreate, handleInteraction);
   if (client.isReady()) begin();
   else client.once(Events.ClientReady, begin);
 
   return {
     stop(): void {
       stopped = true;
+      client.off(Events.InteractionCreate, handleInteraction);
       if (timer) clearInterval(timer);
       timer = undefined;
     },
