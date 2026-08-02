@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { startAnnouncementBadgeLeaderboard } from "./announcementBadgeLeaderboard.js";
 import { installBadgeDeleteIntegration } from "./badgeDeleteIntegration.js";
+import { installBadgeDeleteUserIdSupport } from "./badgeDeleteUserIdSupport.js";
 import { installBrandIntegration } from "./brandIntegration.js";
 import { config } from "./config.js";
 import { installDesktopThemeIntegration } from "./desktopThemeIntegration.js";
@@ -34,6 +35,7 @@ installPresetMarketplaceIntegration();
 installRearrangeSecurity();
 const server = startServer();
 const client = await startDiscordBot();
+await installBadgeDeleteUserIdSupport(client);
 const statusPanel = startStatusPanel(client);
 const badgeLeaderboard = startAnnouncementBadgeLeaderboard(client);
 
