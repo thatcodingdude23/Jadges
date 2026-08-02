@@ -3,6 +3,10 @@ import http, {
   type RequestListener,
   type ServerResponse,
 } from "node:http";
+import {
+  isBotCatalogBadgeName,
+  readDiscordBadgeCatalog,
+} from "./discordBadgeCatalog.js";
 import { isBotOnlyNativeBadgeName } from "./nativeStore.js";
 import { readStore } from "./store.js";
 import type { NitroPreset, UserRecord } from "./types.js";
@@ -19,11 +23,14 @@ interface DashboardBadgeLike {
   image: string;
   movable: boolean;
   subtitle: string;
+  catalogOnly?: boolean;
+  catalogKind?: "bot" | "user";
 }
 
 interface DashboardDataLike {
   profile?: { id?: string };
   badges?: DashboardBadgeLike[];
+  catalogBadges?: DashboardBadgeLike[];
   order?: string[];
   hidden?: string[];
   profileVisibilityReportedAt?: string;
@@ -110,7 +117,10 @@ async function enrichDashboardData(value: unknown): Promise<unknown> {
   const userId = value.profile?.id;
   if (!userId) return value;
 
-  const store = await readStore();
+  const [store, catalog] = await Promise.all([
+    readStore(),
+    readDiscordBadgeCatalog(),
+  ]);
   const user = store.users[userId] as VisibilityUser | undefined;
   if (!user) return value;
 
@@ -119,7 +129,7 @@ async function enrichDashboardData(value: unknown): Promise<unknown> {
   const badgeKeys = new Set(badges.map((badge) => badge.key));
 
   // Keep every real account badge in the editor, including ones currently
-  // hidden on the profile. Bot/application badges are intentionally excluded.
+  // hidden on the profile. Bot/application badges are catalogue-only.
   for (const badge of user.nativeBadges || []) {
     if (isBotOnlyNativeBadgeName(badge.name) || badgeKeys.has(badge.key)) continue;
     badges.push({
@@ -142,10 +152,34 @@ async function enrichDashboardData(value: unknown): Promise<unknown> {
     ...movableKeys.filter((key) => !preferredOrder.includes(key)),
   ];
   const nativeCount = badges.filter((badge) => badge.key.startsWith("discord:")).length;
+  const ownedNativeKeys = new Set(
+    badges
+      .filter((badge) => badge.key.startsWith("discord:"))
+      .map((badge) => badge.key),
+  );
+
+  const catalogBadges: DashboardBadgeLike[] = catalog
+    .filter((badge) => !ownedNativeKeys.has(badge.key))
+    .map((badge) => ({
+      key: `catalog:${badge.key}`,
+      name: badge.name,
+      image: badge.image,
+      movable: false,
+      subtitle: isBotCatalogBadgeName(badge.name)
+        ? "Bot/application badge"
+        : "Not on your account",
+      catalogOnly: true,
+      catalogKind: isBotCatalogBadgeName(badge.name) ? "bot" : "user",
+    }))
+    .sort((left, right) =>
+      Number(left.catalogKind === "bot") - Number(right.catalogKind === "bot")
+      || left.name.localeCompare(right.name),
+    );
 
   return {
     ...value,
     badges,
+    catalogBadges,
     order,
     hidden: detectedHiddenKeys(user, badges),
     profileVisibilityReportedAt: user.profileVisibilityReportedAt,
