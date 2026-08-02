@@ -8,6 +8,8 @@ import type { NitroPreset, UserRecord } from "./types.js";
 
 interface VisibilityUser extends UserRecord {
   hiddenBadgeKeys?: string[];
+  profileVisibleBadgeKeys?: string[];
+  profileVisibilityReportedAt?: string;
 }
 
 interface DashboardBadgeLike {
@@ -23,6 +25,7 @@ interface DashboardDataLike {
   badges?: DashboardBadgeLike[];
   order?: string[];
   hidden?: string[];
+  profileVisibilityReportedAt?: string;
   hasNativeBadges?: boolean;
   stats?: {
     totalBadges?: number;
@@ -35,7 +38,7 @@ interface DashboardDataLike {
 const VALID_BADGE_KEY = /^(?:staff|nitro|custom:[a-z0-9-]{1,100}|discord:[a-z0-9._:-]{1,180})$/i;
 let installed = false;
 
-function normalizedHidden(value: unknown): string[] {
+function normalizedKeys(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return [...new Set(
     value
@@ -65,18 +68,27 @@ function activeNitroPreset(user: UserRecord): NitroPreset | undefined {
   return legacyNitroPreset(user);
 }
 
-function detectedHiddenKeys(user: UserRecord): string[] {
-  const keys = new Set(
-    normalizedHidden((user as VisibilityUser).hiddenBadgeKeys),
-  );
-  const preset = activeNitroPreset(user);
+function detectedHiddenKeys(
+  user: VisibilityUser,
+  badges: DashboardBadgeLike[],
+): string[] {
+  const hidden = new Set(normalizedKeys(user.hiddenBadgeKeys));
+  const hasLiveReport = Array.isArray(user.profileVisibleBadgeKeys)
+    && typeof user.profileVisibilityReportedAt === "string";
 
-  // Jadges replaces Discord's native Nitro badge while a Jadges Nitro
-  // appearance is equipped. The remove preset also hides server boosting.
-  if (preset) keys.add("discord:nitro");
-  if (preset === "remove") keys.add("discord:boosting");
+  if (hasLiveReport) {
+    const visible = new Set(normalizedKeys(user.profileVisibleBadgeKeys));
+    for (const badge of badges) {
+      if (!visible.has(badge.key)) hidden.add(badge.key);
+    }
+  } else {
+    // Compatibility fallback until an updated client reports the real profile.
+    const preset = activeNitroPreset(user);
+    if (preset) hidden.add("discord:nitro");
+    if (preset === "remove") hidden.add("discord:boosting");
+  }
 
-  return [...keys];
+  return [...hidden];
 }
 
 function isDashboardData(value: unknown): value is DashboardDataLike {
@@ -94,15 +106,14 @@ async function enrichDashboardData(value: unknown): Promise<unknown> {
   if (!userId) return value;
 
   const store = await readStore();
-  const user = store.users[userId];
+  const user = store.users[userId] as VisibilityUser | undefined;
   if (!user) return value;
 
   const badges = Array.isArray(value.badges) ? [...value.badges] : [];
   const badgeKeys = new Set(badges.map((badge) => badge.key));
 
-  // Keep every detected native badge in the editor, including badges that are
-  // currently hidden on the Discord profile. This lets the website show their
-  // saved red barrier state and lets users manage them later.
+  // Keep the full inventory in the editor. Visibility is represented by the
+  // red barrier, not by removing a card from the dashboard.
   for (const badge of user.nativeBadges || []) {
     if (badgeKeys.has(badge.key)) continue;
     badges.push({
@@ -130,7 +141,8 @@ async function enrichDashboardData(value: unknown): Promise<unknown> {
     ...value,
     badges,
     order,
-    hidden: detectedHiddenKeys(user),
+    hidden: detectedHiddenKeys(user, badges),
+    profileVisibilityReportedAt: user.profileVisibilityReportedAt,
     hasNativeBadges: nativeCount > 0,
     stats: {
       ...(value.stats || {}),
