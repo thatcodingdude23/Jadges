@@ -6,7 +6,7 @@ import http, {
 } from "node:http";
 import { config } from "./config.js";
 import { getOrCreateUser, mutateStore, readStore } from "./store.js";
-import type { NitroPreset, UserRecord } from "./types.js";
+import type { UserRecord } from "./types.js";
 
 const SESSION_COOKIE = "jadges_session";
 const MAX_BODY_SIZE = 32 * 1024;
@@ -15,6 +15,8 @@ const VALID_BADGE_KEY = /^(?:staff|nitro|custom:[a-z0-9-]{1,100}|discord:[a-z0-9
 
 interface VisibilityUser extends UserRecord {
   hiddenBadgeKeys?: string[];
+  profileVisibleBadgeKeys?: string[];
+  profileVisibilityReportedAt?: string;
 }
 
 let installed = false;
@@ -74,7 +76,7 @@ function sessionUserId(request: IncomingMessage): string | undefined {
   }
 }
 
-function normalizeHidden(value: unknown): string[] {
+function normalizeKeys(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return [...new Set(
     value
@@ -84,42 +86,42 @@ function normalizeHidden(value: unknown): string[] {
   )].slice(0, MAX_HIDDEN_BADGES);
 }
 
-function storedHiddenForUser(user: UserRecord | undefined): string[] {
-  return normalizeHidden((user as VisibilityUser | undefined)?.hiddenBadgeKeys);
+function savedHiddenForUser(user: UserRecord | undefined): string[] {
+  return normalizeKeys((user as VisibilityUser | undefined)?.hiddenBadgeKeys);
 }
 
-function legacyNitroPreset(user: UserRecord): NitroPreset | undefined {
-  let selected: UserRecord["badges"][number] | undefined;
+function knownBadgeKeys(user: UserRecord): string[] {
+  const keys = user.badges
+    .filter((badge) => !badge.pending)
+    .map((badge) => `custom:${badge.id}`);
 
-  for (const badge of user.badges || []) {
-    if (badge.pending || !badge.nitroPreset) continue;
-    const selectedTime = Date.parse(selected?.approvedAt || selected?.createdAt || "");
-    const badgeTime = Date.parse(badge.approvedAt || badge.createdAt || "");
-    if (!selected || !Number.isFinite(selectedTime) || badgeTime >= selectedTime) {
-      selected = badge;
+  if (user.nitro && !user.nitro.pending && user.nitro.preset !== "remove") {
+    keys.push("nitro");
+  }
+  for (const badge of user.nativeBadges || []) keys.push(badge.key);
+  return [...new Set(keys)];
+}
+
+function dashboardHiddenForUser(user: UserRecord | undefined): string[] {
+  if (!user) return [];
+  const visibilityUser = user as VisibilityUser;
+  const hidden = new Set(savedHiddenForUser(user));
+
+  if (
+    Array.isArray(visibilityUser.profileVisibleBadgeKeys)
+    && typeof visibilityUser.profileVisibilityReportedAt === "string"
+  ) {
+    const visible = new Set(normalizeKeys(visibilityUser.profileVisibleBadgeKeys));
+    for (const key of knownBadgeKeys(user)) {
+      if (!visible.has(key)) hidden.add(key);
     }
+  } else {
+    // Compatibility fallback before an updated client has reported the profile.
+    if (user.nitro && !user.nitro.pending) hidden.add("discord:nitro");
+    if (user.nitro?.preset === "remove") hidden.add("discord:boosting");
   }
 
-  return selected?.nitroPreset;
-}
-
-function automaticHiddenForUser(user: UserRecord | undefined): string[] {
-  if (!user) return [];
-  const preset = user.nitro && !user.nitro.pending
-    ? user.nitro.preset
-    : legacyNitroPreset(user);
-  if (!preset) return [];
-
-  const hidden = ["discord:nitro"];
-  if (preset === "remove") hidden.push("discord:boosting");
-  return hidden;
-}
-
-function hiddenForUser(user: UserRecord | undefined): string[] {
-  return [...new Set([
-    ...storedHiddenForUser(user),
-    ...automaticHiddenForUser(user),
-  ])].slice(0, MAX_HIDDEN_BADGES);
+  return [...hidden];
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {
@@ -166,9 +168,11 @@ async function handlePrivateVisibility(
 
   if (request.method === "GET" || request.method === "HEAD") {
     const data = await readStore();
+    const user = data.users[userId];
     sendJson(request, response, 200, {
-      hidden: hiddenForUser(data.users[userId]),
-      detected: automaticHiddenForUser(data.users[userId]),
+      hidden: dashboardHiddenForUser(user),
+      savedHidden: savedHiddenForUser(user),
+      reportedAt: (user as VisibilityUser | undefined)?.profileVisibilityReportedAt,
     });
     return;
   }
@@ -185,15 +189,15 @@ async function handlePrivateVisibility(
       keys?: unknown;
     };
 
-    let responseHidden: string[] = [];
+    let saved: string[] = [];
     let detected: string[] = [];
+    let reportedAt: string | undefined;
     await mutateStore((data) => {
       const user = getOrCreateUser(data, userId) as VisibilityUser;
-      const current = new Set(storedHiddenForUser(user));
-      let saved: string[];
+      const current = new Set(savedHiddenForUser(user));
 
       if (body.keys !== undefined) {
-        saved = normalizeHidden(body.keys);
+        saved = normalizeKeys(body.keys);
       } else {
         if (typeof body.key !== "string" || !VALID_BADGE_KEY.test(body.key.trim())) {
           throw new Error("Invalid badge key");
@@ -209,15 +213,14 @@ async function handlePrivateVisibility(
 
       if (saved.length > 0) user.hiddenBadgeKeys = saved;
       else delete user.hiddenBadgeKeys;
-
-      detected = automaticHiddenForUser(user);
-      responseHidden = [...new Set([...saved, ...detected])]
-        .slice(0, MAX_HIDDEN_BADGES);
+      detected = dashboardHiddenForUser(user);
+      reportedAt = user.profileVisibilityReportedAt;
     });
 
     sendJson(request, response, 200, {
-      hidden: responseHidden,
-      detected,
+      hidden: detected,
+      savedHidden: saved,
+      reportedAt,
     });
   } catch (error) {
     sendJson(request, response, 400, {
@@ -235,10 +238,13 @@ async function handlePublicVisibility(
     return;
   }
 
+  // Only deliberately hidden badges are sent to clients. Badges missing from a
+  // live profile report are display information for the website, not a command
+  // to hide them again.
   const data = await readStore();
   const result: Record<string, string[]> = {};
   for (const [userId, user] of Object.entries(data.users)) {
-    const hidden = hiddenForUser(user);
+    const hidden = savedHiddenForUser(user);
     if (hidden.length > 0) result[userId] = hidden;
   }
   sendJson(request, response, 200, result, true);
