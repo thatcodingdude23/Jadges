@@ -11,6 +11,7 @@ import { installHiddenDashboardIntegration } from "./hiddenDashboardIntegration.
 import { installNativeInventoryIntegration } from "./nativeInventoryIntegration.js";
 import { installPartnerBadgeIntegration } from "./partnerBadgeIntegration.js";
 import { installPresetMarketplaceIntegration } from "./presetIntegration.js";
+import { installPresetModerationDiscord, installPresetModerationWebsite } from "./presetModerationIntegration.js";
 import { installPreviewIntegration } from "./previewIntegration.js";
 import { installProfileVisibilityReportIntegration } from "./profileVisibilityReportIntegration.js";
 import { installRearrangeSecurity } from "./rearrangeSecurity.js";
@@ -32,10 +33,12 @@ installPreviewIntegration();
 installBrandIntegration();
 installWebsiteIntegration();
 installPresetMarketplaceIntegration();
+installPresetModerationWebsite();
 installRearrangeSecurity();
 const server = startServer();
 const client = await startDiscordBot();
 await installBadgeDeleteUserIdSupport(client);
+installPresetModerationDiscord(client);
 const statusPanel = startStatusPanel(client);
 const badgeLeaderboard = startAnnouncementBadgeLeaderboard(client);
 
