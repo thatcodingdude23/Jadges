@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { installBadgeDeleteIntegration } from "./badgeDeleteIntegration.js";
+import { startBadgeLeaderboard } from "./badgeLeaderboard.js";
 import { installBrandIntegration } from "./brandIntegration.js";
 import { config } from "./config.js";
 import { installDesktopThemeIntegration } from "./desktopThemeIntegration.js";
@@ -30,9 +31,11 @@ installRearrangeSecurity();
 const server = startServer();
 const client = await startDiscordBot();
 const statusPanel = startStatusPanel(client);
+const badgeLeaderboard = startBadgeLeaderboard(client);
 
 async function shutdown(signal: string): Promise<void> {
   console.log(`Received ${signal}; shutting down.`);
+  badgeLeaderboard.stop();
   await statusPanel.stop(true);
   server.close();
   client.destroy();
