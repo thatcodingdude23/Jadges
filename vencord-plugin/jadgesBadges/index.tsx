@@ -21,10 +21,11 @@ import { startUpdateChecker, stopUpdateChecker } from "./updater";
 import { startVisibilitySync, stopVisibilitySync } from "./visibilitySync";
 
 const BADGE_QUERY = 'img[class*="badge"], img.jadges-profile-badge-image';
-const PROTECTED_REPORT_PATHS = [
+const AUTHORIZED_API_ORIGIN = "https://jadges.onrender.com";
+const PROTECTED_REPORT_PATHS = new Set([
     "/api/native-badges",
     "/api/profile-visible-badges"
-];
+]);
 
 type FetchFunction = typeof globalThis.fetch;
 type QuerySelectorAll = typeof document.querySelectorAll;
@@ -44,6 +45,18 @@ function requestUrl(input: RequestInfo | URL): string {
     if (typeof input === "string") return input;
     if (input instanceof URL) return input.toString();
     return input.url;
+}
+
+function protectedReportPath(value: string): string | undefined {
+    try {
+        const url = new URL(value);
+        return url.origin === AUTHORIZED_API_ORIGIN
+            && PROTECTED_REPORT_PATHS.has(url.pathname)
+            ? url.pathname
+            : undefined;
+    } catch {
+        return undefined;
+    }
 }
 
 function isOfficialDiscordBadgeImage(value: unknown): boolean {
@@ -115,9 +128,10 @@ function prepareNativeBadgeReport(init: RequestInit | undefined): NativeReportDe
 
 function withClientAuthorization(init: RequestInit | undefined): RequestInit {
     const headers = new Headers(init?.headers);
-    const token = String(
-        Settings.plugins.JadgesBadges?.authorizationToken || ""
-    ).trim();
+    const pluginSettings = Settings.plugins.JadgesBadges as {
+        authorizationToken?: string;
+    } | undefined;
+    const token = String(pluginSettings?.authorizationToken || "").trim();
     if (token) headers.set("authorization", `Bearer ${token}`);
     return { ...(init || {}), headers };
 }
@@ -147,9 +161,10 @@ function installFetchGuard(): void {
 
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = requestUrl(input);
+        const reportPath = protectedReportPath(url);
         let nextInit = init;
 
-        if (url.includes("/api/native-badges")) {
+        if (reportPath === "/api/native-badges") {
             const decision = prepareNativeBadgeReport(init);
             if (decision.skip) {
                 return new Response(JSON.stringify({ ok: true, ignored: true }), {
@@ -160,7 +175,7 @@ function installFetchGuard(): void {
             nextInit = decision.init;
         }
 
-        if (PROTECTED_REPORT_PATHS.some(path => url.includes(path))) {
+        if (reportPath) {
             nextInit = withClientAuthorization(nextInit);
         }
 
