@@ -1,0 +1,154 @@
+.client-auth-panel {
+  margin: 0 22px 22px;
+  padding: 18px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  border: 1px solid rgba(91, 140, 255, .22);
+  border-radius: 14px;
+  background: linear-gradient(145deg, rgba(91, 140, 255, .08), rgba(124, 77, 255, .055));
+}
+
+.client-auth-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.client-auth-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.client-auth-heading strong {
+  display: block;
+  color: #f3f6ff;
+  font-size: 13px;
+}
+
+.client-auth-heading div > span {
+  display: block;
+  margin-top: 5px;
+  color: #8f9db9;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.client-auth-status {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid rgba(151, 164, 196, .2);
+  border-radius: 999px;
+  color: #8f9db9;
+  background: rgba(255, 255, 255, .025);
+  font-size: 10px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.client-auth-status.active {
+  border-color: rgba(70, 212, 131, .28);
+  color: #7be4a7;
+  background: rgba(70, 212, 131, .08);
+}
+
+.client-auth-note {
+  margin: 12px 0 0;
+  color: #707f9c;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.client-auth-token-wrap {
+  margin-top: 13px;
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.client-auth-token-wrap code {
+  min-width: 0;
+  flex: 1;
+  padding: 11px 12px;
+  overflow: hidden;
+  border: 1px solid rgba(151, 164, 196, .18);
+  border-right: 0;
+  border-radius: 10px 0 0 10px;
+  color: #dbe4ff;
+  background: rgba(6, 10, 19, .55);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.client-auth-copy-button {
+  padding: 0 13px;
+  border-radius: 0 10px 10px 0;
+  color: #fff;
+  background: rgba(91, 140, 255, .26);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.client-auth-copy-button:hover {
+  background: rgba(91, 140, 255, .38);
+}
+
+.client-auth-expiry {
+  margin-top: 8px;
+  min-height: 15px;
+  color: #667491;
+  font-size: 10px;
+}
+
+.client-auth-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.client-auth-generate {
+  min-height: 38px;
+  padding: 0 13px;
+  font-size: 11px;
+}
+
+.client-auth-revoke {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 95, 115, .28);
+  border-radius: 10px;
+  color: #ff91a0;
+  background: rgba(255, 95, 115, .07);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.client-auth-revoke:hover {
+  background: rgba(255, 95, 115, .13);
+}
+
+.client-auth-actions button:disabled,
+.client-auth-copy-button:disabled {
+  opacity: .55;
+  cursor: wait;
+}
+
+@media (max-width: 720px) {
+  .client-auth-panel {
+    flex-direction: column;
+  }
+
+  .client-auth-actions {
+    width: 100%;
+  }
+
+  .client-auth-actions button {
+    flex: 1;
+  }
+}
