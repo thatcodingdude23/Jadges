@@ -29,6 +29,8 @@ services:
         sync: false
       - key: PROMPT_CHANNEL
         sync: false
+      - key: ADMIN_LOG_CHANNEL
+        sync: false
       - key: VERIFIER_ROLE
         sync: false
       - key: PUBLIC_URL

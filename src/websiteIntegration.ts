@@ -4,6 +4,10 @@ import http, {
   type RequestListener,
   type ServerResponse,
 } from "node:http";
+import {
+  canAccessAdminPanel,
+  handleAdminRequest,
+} from "./adminPanel.js";
 import { config } from "./config.js";
 import { handleWebsiteRequest } from "./website.js";
 import type { UserRecord } from "./types.js";
@@ -84,7 +88,10 @@ function verifyIdentityPayload<T extends SignedIdentityPayload>(
 
   const expected = Buffer.from(signature(body));
   const supplied = Buffer.from(suppliedSignature);
-  if (expected.length !== supplied.length || !timingSafeEqual(expected, supplied)) {
+  if (
+    expected.length !== supplied.length
+    || !timingSafeEqual(expected, supplied)
+  ) {
     return undefined;
   }
 
@@ -93,9 +100,9 @@ function verifyIdentityPayload<T extends SignedIdentityPayload>(
       Buffer.from(body, "base64url").toString("utf8"),
     ) as SignedIdentityPayload;
     if (
-      payload.kind !== kind ||
-      payload.expiresAt <= Date.now() ||
-      !/^\d{15,22}$/.test(payload.userId)
+      payload.kind !== kind
+      || payload.expiresAt <= Date.now()
+      || !/^\d{15,22}$/.test(payload.userId)
     ) {
       return undefined;
     }
@@ -112,6 +119,7 @@ function sessionUserId(request: IncomingMessage): string | undefined {
     .find((part) => part.startsWith(`${SESSION_COOKIE}=`));
   const raw = cookie?.slice(SESSION_COOKIE.length + 1);
   if (!raw) return undefined;
+
   try {
     return verifyIdentityPayload<SessionPayload>(
       decodeURIComponent(raw),
@@ -159,7 +167,9 @@ async function refreshUserAccess(userId: string): Promise<void> {
       roleCache.set(userId, { access: "none", checkedAt: Date.now() });
       return;
     }
-    if (!response.ok) throw new Error(`Discord returned HTTP ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`Discord returned HTTP ${response.status}`);
+    }
 
     const member = await response.json() as { roles?: unknown };
     const roles = Array.isArray(member.roles)
@@ -173,7 +183,9 @@ async function refreshUserAccess(userId: string): Promise<void> {
     roleCache.set(userId, { access, checkedAt: Date.now() });
   } catch (error) {
     console.warn(`Could not refresh website staff access for ${userId}:`, error);
-    if (!cached) roleCache.set(userId, { access: "none", checkedAt: Date.now() });
+    if (!cached) {
+      roleCache.set(userId, { access: "none", checkedAt: Date.now() });
+    }
   }
 }
 
@@ -195,7 +207,10 @@ function redirect(response: ServerResponse, location: string): void {
   response.end();
 }
 
-function startWebsiteLogin(request: IncomingMessage, response: ServerResponse): boolean {
+function startWebsiteLogin(
+  request: IncomingMessage,
+  response: ServerResponse,
+): boolean {
   if (request.method !== "GET") return false;
   if (sessionUserId(request)) {
     redirect(response, "/dashboard");
@@ -211,12 +226,57 @@ function startWebsiteLogin(request: IncomingMessage, response: ServerResponse): 
   const authorize = new URL("https://discord.com/oauth2/authorize");
   authorize.searchParams.set("client_id", config.clientId);
   authorize.searchParams.set("response_type", "code");
-  authorize.searchParams.set("redirect_uri", `${config.publicUrl}/oauth/callback`);
+  authorize.searchParams.set(
+    "redirect_uri",
+    `${config.publicUrl}/oauth/callback`,
+  );
   authorize.searchParams.set("scope", "identify");
   authorize.searchParams.set("state", state);
   authorize.searchParams.set("prompt", "consent");
   redirect(response, authorize.toString());
   return true;
+}
+
+function installAdminDashboardLink(response: ServerResponse): void {
+  const originalEnd = response.end.bind(response);
+  let ended = false;
+
+  response.end = ((
+    chunk?: any,
+    encoding?: any,
+    callback?: any,
+  ): ServerResponse => {
+    if (ended) return response;
+    ended = true;
+
+    if (
+      chunk === undefined
+      || response.statusCode < 200
+      || response.statusCode >= 300
+    ) {
+      originalEnd(chunk, encoding, callback);
+      return response;
+    }
+
+    const body = Buffer.isBuffer(chunk)
+      ? chunk.toString("utf8")
+      : chunk instanceof Uint8Array
+        ? Buffer.from(chunk).toString("utf8")
+        : String(chunk);
+
+    const marker = `</nav>
+      <div class="sidebar-spacer">`;
+    const adminLink = `<a class="nav-link" href="/admin"><svg viewBox="0 0 24 24"><path d="M12 3 20 6v5c0 5-3.2 8.7-8 10-4.8-1.3-8-5-8-10V6l8-3Z"/><path d="M9.5 12.2 11.2 14l3.7-4"/></svg>Admin Panel</a>
+      </nav>
+      <div class="sidebar-spacer">`;
+
+    originalEnd(
+      body.includes(marker) ? body.replace(marker, adminLink) : body,
+      "utf8",
+      callback,
+    );
+    return response;
+  }) as typeof response.end;
 }
 
 function wrap(listener: RequestListener): RequestListener {
@@ -229,16 +289,31 @@ function wrap(listener: RequestListener): RequestListener {
       }
 
       if (
-        url.pathname === "/rearrange" &&
-        matchingRearrangeSession(request, url)
+        url.pathname === "/rearrange"
+        && matchingRearrangeSession(request, url)
       ) {
         redirect(response, "/dashboard");
         return;
       }
 
-      if (url.pathname === "/dashboard" || url.pathname === "/api/dashboard") {
+      if (await handleAdminRequest(request, response, url)) {
+        return;
+      }
+
+      if (
+        url.pathname === "/dashboard"
+        || url.pathname === "/api/dashboard"
+      ) {
         const userId = sessionUserId(request);
-        if (userId) await refreshUserAccess(userId);
+        if (userId) {
+          await refreshUserAccess(userId);
+          if (
+            url.pathname === "/dashboard"
+            && await canAccessAdminPanel(userId)
+          ) {
+            installAdminDashboardLink(response);
+          }
+        }
       }
 
       const handled = await handleWebsiteRequest(

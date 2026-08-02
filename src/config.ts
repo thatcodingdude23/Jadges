@@ -17,23 +17,30 @@ function positiveNumber(name: string, fallback: number): number {
 const port = positiveNumber("PORT", 10000);
 const dataDir = path.resolve(process.env.DATA_DIR?.trim() || "./data");
 const publicUrl = (
-  process.env.PUBLIC_URL?.trim() ||
-  process.env.RENDER_EXTERNAL_URL?.trim() ||
-  `http://localhost:${port}`
+  process.env.PUBLIC_URL?.trim()
+  || process.env.RENDER_EXTERNAL_URL?.trim()
+  || `http://localhost:${port}`
 ).replace(/\/$/, "");
 const discordToken = required("DISCORD_TOKEN");
-const discordClientSecret = process.env.DISCORD_CLIENT_SECRET?.trim() || undefined;
+const discordClientSecret =
+  process.env.DISCORD_CLIENT_SECRET?.trim() || undefined;
+const promptChannel = required("PROMPT_CHANNEL");
 
 export const config = {
   discordToken,
   discordClientSecret,
   clientId: required("CLIENT_ID"),
   guildId: process.env.GUILD_ID?.trim() || undefined,
-  promptChannel: required("PROMPT_CHANNEL"),
+  promptChannel,
+  adminLogChannel:
+    process.env.ADMIN_LOG_CHANNEL?.trim()
+    || promptChannel,
   verifierRole: required("VERIFIER_ROLE"),
   publicUrl,
   webSessionSecret:
-    process.env.WEB_SESSION_SECRET?.trim() || discordClientSecret || discordToken,
+    process.env.WEB_SESSION_SECRET?.trim()
+    || discordClientSecret
+    || discordToken,
   jaycordStaffBadgeUrl:
     "https://jadges.onrender.com/badges/f395fbf2-d778-49eb-ab15-489a6ce16995.webp",
   jaycordAdminBadgeUrl:
