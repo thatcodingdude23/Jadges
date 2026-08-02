@@ -1,6 +1,6 @@
 {
   "name": "Jadges Badges",
-  "description": "Displays and rearranges Jadges badges and synchronizes the user's saved Jadges account theme on mobile.",
+  "description": "Displays and rearranges Jadges badges, synchronizes account appearance, and authorizes secure profile reporting automatically.",
   "authors": [
     {
       "name": "Jaycord",
@@ -11,5 +11,5 @@
   "vendetta": {
     "icon": "ic_badge_staff"
   },
-  "hash": "3e8af7ec1b765b6be15c2f95ffdb46e0e993672672026779c2866374aa5357e3"
+  "hash": "0acbf0d2a6d51a1fe8dec1bd637ad3c681400a3297178aad251952c9b1e1b6be"
 }
