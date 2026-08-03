@@ -12,6 +12,7 @@ import { installNativeInventoryIntegration } from "./nativeInventoryIntegration.
 import { installPartnerBadgeIntegration } from "./partnerBadgeIntegration.js";
 import { installPresetMarketplaceIntegration } from "./presetIntegration.js";
 import { installPresetModerationDiscord, installPresetModerationWebsite } from "./presetModerationIntegration.js";
+import { installPresetOwnerDeleteIntegration } from "./presetOwnerDeleteIntegration.js";
 import { installPreviewIntegration } from "./previewIntegration.js";
 import { installProfileVisibilityReportIntegration } from "./profileVisibilityReportIntegration.js";
 import { installRearrangeSecurity } from "./rearrangeSecurity.js";
@@ -33,8 +34,10 @@ installPreviewIntegration();
 installBrandIntegration();
 installWebsiteIntegration();
 // Install moderation first so its request wrapper is outermost and can intercept
-// preset uploads before the marketplace publishes them.
+// preset uploads before the marketplace publishes them. Owner deletion is placed
+// between moderation and marketplace so it can secure preset detail/delete routes.
 installPresetModerationWebsite();
+installPresetOwnerDeleteIntegration();
 installPresetMarketplaceIntegration();
 installRearrangeSecurity();
 const server = startServer();
