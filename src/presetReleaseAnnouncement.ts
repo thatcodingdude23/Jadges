@@ -17,11 +17,22 @@ const SENT_STATE_FILE = path.join(
 );
 
 export const PRESET_RELEASE_ANNOUNCEMENT = [
-  "@everyone **Jadges Presets are officially here!** 🎉",
+  "@everyone **Jadges Presets have officially released!**",
   "",
-  "You can now create your own preset badges, share them with the community, and add community-made presets directly to your Jadges profile.",
+  "Presets are a new way to create, share, and use custom badge designs across Jadges.",
   "",
-  `Browse and create presets here: ${config.publicUrl}/presets`,
+  "With Jadges Presets, you can:",
+  "- Upload your own badge image and give it a custom name.",
+  "- Preview exactly how the badge will appear on a Discord profile before submitting it.",
+  "- Submit new presets for staff review before they are published publicly.",
+  "- Browse approved presets created by other members of the community.",
+  "- Add any available preset directly to your Jadges profile.",
+  "- See who uploaded each preset and how many times it has been claimed.",
+  "- Delete presets that you created, including removing claimed copies from profiles.",
+  "",
+  "Every submitted preset is reviewed before it becomes public, helping keep the Presets page safe, organized, and filled with appropriate badge designs.",
+  "",
+  `Create, browse, and use presets here: ${config.publicUrl}/presets`,
 ].join("\n");
 
 interface SentState {
