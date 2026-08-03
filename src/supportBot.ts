@@ -8,12 +8,77 @@ import { config } from "./config.js";
 
 const SUPPORT_CHANNEL_ID = "1532718405440901230";
 const USER_COOLDOWN_MS = 1_500;
+const HISTORY_TTL_MS = 30 * 60 * 1_000;
+const MAX_HISTORY_TURNS = 8;
+const AI_TIMEOUT_MS = 15_000;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY?.trim();
+const OPENAI_SUPPORT_MODEL =
+  process.env.OPENAI_SUPPORT_MODEL?.trim() || "gpt-5-mini";
+
+const VENCORD_PLUGIN_URL =
+  "https://github.com/thatcodingdude23/Jadges/tree/main/vencord-plugin/jadgesBadges";
+const REVENGE_PLUGIN_URL =
+  "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/";
+const KETTU_PLUGIN_URL =
+  "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/kettu-plugin/";
+
+interface ConversationTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+interface ConversationHistory {
+  updatedAt: number;
+  turns: ConversationTurn[];
+}
+
+interface OpenAIResponsePayload {
+  output_text?: string;
+  output?: Array<{
+    type?: string;
+    content?: Array<{
+      type?: string;
+      text?: string;
+    }>;
+  }>;
+  error?: {
+    message?: string;
+  };
+}
 
 export interface JadgesSupportBotHandle {
   stop(): void;
 }
 
 const lastReplyAt = new Map<string, number>();
+const conversationHistory = new Map<string, ConversationHistory>();
+const activeRequests = new Set<string>();
+
+const SUPPORT_INSTRUCTIONS = `You are the official Jadges support bot inside the Jaycord Discord server.
+
+Your job is to understand natural wording, spelling mistakes, slang, incomplete questions, and follow-up messages about Jadges. Give a direct, useful answer instead of asking the user to repeat themselves when their intent can reasonably be inferred.
+
+Only answer questions related to Jadges, its Discord bot, its website, its badge system, its Presets marketplace, and installing or troubleshooting its supported client plugins. For unrelated questions, briefly say this channel is for Jadges support.
+
+Use these confirmed Jadges facts:
+- Jadges adds custom profile badges that are visible to people using the Jadges plugin.
+- Supported clients are Vencord on desktop, Revenge on Android, and Kettu on Android and iOS.
+- Vencord is a custom userplugin. Copy the jadgesBadges folder from ${VENCORD_PLUGIN_URL} into Vencord/src/userplugins/jadgesBadges, rebuild Vencord, restart Discord, then enable JadgesBadges in Vencord Settings > Plugins. It is not installed from Vencord's normal built-in plugin list.
+- Revenge plugin source: ${REVENGE_PLUGIN_URL}
+- Kettu: open Kettu Settings > Plugins, add a plugin from URL, and paste ${KETTU_PLUGIN_URL}
+- Create a custom badge with /badge create and attach PNG, JPG, WEBP, GIF, or APNG up to 5 MB.
+- Submissions remain pending until staff approve or deny them. There is no guaranteed review time.
+- Normal users have 5 custom badge slots. Server boosters get 5 extra slots. The unlimited-badges role bypasses the limit.
+- Remove a custom badge with /badge remove. List badges with /badge list. Rearrange them with /badge rearrange.
+- Set a Jadges Nitro appearance with /badge nitro set and remove it with /badge nitro remove.
+- Presets are at ${config.publicUrl}/presets. Users can browse approved community presets, claim them, upload their own, preview them, and see creator and claim information.
+- Preset uploads require staff approval. Only the uploader can delete a preset. Delete Preset Everywhere removes the listing and all claimed copies from profiles.
+- Badges not showing: confirm approval, restart or refresh Discord, enable the Jadges plugin, and remember users without the plugin cannot see Jadges badges.
+- The official website is ${config.publicUrl}.
+- Never ask users to share bot tokens, API keys, passwords, session cookies, or other secrets.
+- Do not invent staff decisions, approval times, server permissions, account data, or outage status. When account-specific information is required, tell the user what to check or ask staff to inspect it.
+
+Keep replies clear and usually under 1,200 characters. Use Discord markdown when helpful. Do not ping anyone.`;
 
 function normalizeMessage(content: string): string {
   return content
@@ -30,22 +95,32 @@ function includesAny(text: string, values: string[]): boolean {
 }
 
 function isAcknowledgement(text: string): boolean {
-  return /^(thanks|thank you|ty|thx|ok|okay|alr|alright|got it|fixed|solved|works|working|nice|cool)[!. ]*$/.test(text);
+  return /^(thanks|thank you|ty|thx|ok|okay|alr|alright|got it|fixed|solved|works|working|nice|cool|great|perfect)[!. ]*$/.test(
+    text,
+  );
 }
 
 function isGreeting(text: string): boolean {
-  return /^(hi|hello|hey|yo|sup|salam|assalamualaikum|as-salamu alaykum)( there)?[!. ]*$/.test(text);
+  return /^(hi|hello|hey|yo|sup|salam|assalamualaikum|as-salamu alaykum)( there)?[!. ]*$/.test(
+    text,
+  );
 }
 
-function soundsLikeQuestion(text: string): boolean {
-  return text.includes("?")
-    || /^(how|what|why|when|where|who|can|could|do|does|did|is|are|will|would|should|help)\b/.test(text)
+function soundsLikeSupportRequest(text: string): boolean {
+  return (
+    text.includes("?")
+    || /^(how|what|why|when|where|who|can|could|do|does|did|is|are|will|would|should|help)\b/.test(
+      text,
+    )
     || includesAny(text, [
       "jadges",
       "badge",
       "preset",
       "nitro",
       "plugin",
+      "vencord",
+      "revenge",
+      "kettu",
       "not working",
       "doesn't work",
       "doesnt work",
@@ -53,26 +128,68 @@ function soundsLikeQuestion(text: string): boolean {
       "issue",
       "problem",
       "support",
-    ]);
+      "install",
+    ])
+  );
 }
 
 function isBadgeCreationQuestion(text: string): boolean {
-  return /\b(?:create|make|add|submit|upload|get)\s+(?:(?:me|my|a|an|new|custom|own)\s+)*badges?\b/.test(text)
-    || /\bhow\s+(?:do|can|could|would|should)\s+i\s+(?:create|make|add|submit|upload|get)\b/.test(text)
-      && /\bbadges?\b/.test(text);
+  return (
+    /\b(?:create|make|add|submit|upload|get)\s+(?:(?:me|my|a|an|new|custom|own)\s+)*badges?\b/.test(
+      text,
+    )
+    || (/\bhow\s+(?:do|can|could|would|should)\s+i\s+(?:create|make|add|submit|upload|get)\b/.test(
+      text,
+    )
+      && /\bbadges?\b/.test(text))
+  );
 }
 
 function isBadgeRemovalQuestion(text: string): boolean {
-  return /\b(?:remove|delete|unequip)\s+(?:(?:my|a|an|the|this|custom|own)\s+)*badges?\b/.test(text)
-    || /\bget rid of\s+(?:(?:my|a|an|the|this|custom|own)\s+)*badges?\b/.test(text);
+  return (
+    /\b(?:remove|delete|unequip)\s+(?:(?:my|a|an|the|this|custom|own)\s+)*badges?\b/.test(
+      text,
+    )
+    || /\bget rid of\s+(?:(?:my|a|an|the|this|custom|own)\s+)*badges?\b/.test(
+      text,
+    )
+  );
 }
 
-function supportResponse(rawContent: string): string | undefined {
+function deterministicResponse(rawContent: string): string | undefined {
   const text = normalizeMessage(rawContent);
   if (!text || isAcknowledgement(text)) return undefined;
 
   if (isGreeting(text)) {
-    return "Hey! I’m the Jadges support bot. Ask me about creating badges, approvals, badge limits, Presets, Nitro badges, visibility, removing badges, or rearranging your profile.";
+    return "Hey! Ask me anything about Jadges, including installing the plugin, creating badges, approvals, Presets, Nitro badges, visibility, removal, or rearranging your profile.";
+  }
+
+  if (
+    text.includes("vencord")
+    && includesAny(text, [
+      "install",
+      "download",
+      "setup",
+      "set up",
+      "add plugin",
+      "get plugin",
+    ])
+  ) {
+    return `Jadges is a **custom Vencord userplugin**, so it will not appear in the normal built-in plugin list.\n\n1. Get the \`jadgesBadges\` folder here: ${VENCORD_PLUGIN_URL}\n2. Put it in \`Vencord/src/userplugins/jadgesBadges\`.\n3. Rebuild Vencord using your normal Vencord build command.\n4. Restart Discord.\n5. Open **Vencord Settings → Plugins**, search **JadgesBadges**, and enable it.`;
+  }
+
+  if (
+    text.includes("kettu")
+    && includesAny(text, ["install", "download", "setup", "plugin", "url"])
+  ) {
+    return `Open **Kettu Settings → Plugins**, choose **Add plugin from URL**, and paste:\n${KETTU_PLUGIN_URL}`;
+  }
+
+  if (
+    text.includes("revenge")
+    && includesAny(text, ["install", "download", "setup", "plugin", "url"])
+  ) {
+    return `In Revenge, add this plugin source URL:\n${REVENGE_PLUGIN_URL}`;
   }
 
   if (
@@ -86,7 +203,7 @@ function supportResponse(rawContent: string): string | undefined {
       "jadges bot",
     ])
   ) {
-    return "Jadges lets people create and equip custom Discord profile badges. Approved badges appear on your profile for people who have the Jadges plugin installed. Jadges also includes community Presets, Nitro badge presets, badge rearranging, profile placement controls, and a public badge leaderboard.";
+    return "Jadges lets users create and equip custom Discord profile badges. It also includes community Presets, Nitro badge appearances, badge rearranging and placement, staff badges, and a public badge leaderboard. Jadges customizations are visible to users with the Jadges plugin installed.";
   }
 
   if (
@@ -103,32 +220,32 @@ function supportResponse(rawContent: string): string | undefined {
       "not appearing",
     ])
   ) {
-    return "First, make sure the badge was approved and is not still pending. Then refresh or fully restart Discord. Custom Jadges badges are only visible to users who have the Jadges plugin installed, so people without the plugin will not see them. Also confirm that you are signed into the same Discord account that owns the badge.";
+    return "Make sure the badge was approved and is not still pending, then fully restart or refresh Discord. Confirm the Jadges plugin is installed and enabled on the account viewing the profile. Users without the plugin cannot see Jadges badges.";
   }
 
   if (
     text.includes("preset")
     && includesAny(text, ["create", "upload", "make", "submit", "publish"])
   ) {
-    return `Open ${config.publicUrl}/presets, sign in with Discord, and choose the option to create a preset. Add the badge name and image, check the profile preview, then submit it. Staff must approve the preset before it becomes publicly available.`;
+    return `Open ${config.publicUrl}/presets, sign in with Discord, create the preset, add its name and image, check the preview, and submit it. Staff must approve it before it becomes public.`;
   }
 
   if (
     text.includes("preset")
     && includesAny(text, ["get", "claim", "use", "add", "equip"])
   ) {
-    return `Go to ${config.publicUrl}/presets, open an approved preset, and press **Get Badge**. The preset will be added to your Jadges profile. You cannot claim the same preset more than once on the same account.`;
+    return `Go to ${config.publicUrl}/presets, open an approved preset, and press **Get Badge**. It will be added to your Jadges profile.`;
   }
 
   if (
     text.includes("preset")
     && includesAny(text, ["delete", "remove everywhere", "remove from everyone"])
   ) {
-    return "Only the person who uploaded a preset can delete it. Open your preset on the Presets website and use **Delete Preset Everywhere**. This removes the preset listing and every claimed copy from users’ Jadges profiles.";
+    return "Only the uploader can delete a preset. Open your preset and use **Delete Preset Everywhere**. This removes the listing and every claimed copy from Jadges profiles.";
   }
 
   if (text.includes("preset")) {
-    return `Jadges Presets are community-made badge designs. You can browse approved presets, claim them for your profile, upload your own design, preview it before submitting, see its creator and claim count, and manage presets you uploaded. Visit ${config.publicUrl}/presets.`;
+    return `Jadges Presets are community-made badge designs. Browse, claim, and create them at ${config.publicUrl}/presets.`;
   }
 
   if (
@@ -141,11 +258,11 @@ function supportResponse(rawContent: string): string | undefined {
       "approve my",
     ])
   ) {
-    return "Badge and preset submissions stay pending until a staff member reviews them. There is no guaranteed approval time. You will receive a DM when a custom badge or Nitro preset is approved or denied.";
+    return "Submissions stay pending until a staff member reviews them. There is no guaranteed approval time. Jadges sends a DM when a custom badge or Nitro request is approved or denied.";
   }
 
   if (isBadgeCreationQuestion(text)) {
-    return "Run `/badge create`, enter the badge name, and attach its image. Supported formats are PNG, JPG, WEBP, GIF, and APNG, with a maximum size of 5 MB. The badge is sent to staff for approval and becomes equipped after it is approved.";
+    return "Run `/badge create`, enter the badge name, and attach its image. Jadges accepts PNG, JPG, WEBP, GIF, and APNG files up to 5 MB. The badge is equipped after staff approve it.";
   }
 
   if (
@@ -164,7 +281,7 @@ function supportResponse(rawContent: string): string | undefined {
     ])
     && text.includes("badge")
   ) {
-    return "Jadges accepts PNG, JPG, WEBP, GIF, and APNG badge images. The maximum upload size is 5 MB. Use a clear image that will still look good when displayed as a small profile badge.";
+    return "Jadges accepts PNG, JPG, WEBP, GIF, and APNG badge images up to 5 MB.";
   }
 
   if (
@@ -176,22 +293,22 @@ function supportResponse(rawContent: string): string | undefined {
       "too many badges",
     ])
   ) {
-    return "The normal limit is 5 custom badges, including pending submissions. Server boosters receive 5 additional slots, for a total of 10. Users with the unlimited-badges role are not restricted by that limit.";
+    return "The normal limit is 5 custom badges, including pending submissions. Server boosters receive 5 extra slots, for a total of 10. The unlimited-badges role bypasses the limit.";
   }
 
   if (
     text.includes("nitro")
     && includesAny(text, ["remove", "restore", "disable", "native"])
   ) {
-    return "Use `/badge nitro remove` to remove your equipped or pending Jadges Nitro badge. If Jadges was hiding your native Discord Nitro or boosting badges, removing the Jadges Nitro setting restores those native badges for Jadges users.";
+    return "Use `/badge nitro remove` to remove an equipped or pending Jadges Nitro badge. This also restores native Discord Nitro and boosting badges for Jadges users when they were hidden.";
   }
 
   if (text.includes("nitro")) {
-    return "Use `/badge nitro set` and choose the Nitro appearance you want. The request is sent to staff for approval. Once approved, the selected Nitro badge appears through Jadges for other plugin users. Use `/badge nitro remove` whenever you want to remove it.";
+    return "Use `/badge nitro set` and select the appearance you want. Staff review the request before it is equipped. Use `/badge nitro remove` to remove it.";
   }
 
   if (isBadgeRemovalQuestion(text)) {
-    return "Use `/badge remove` and select the custom badge you want to delete. The badge is removed from your profile and its stored image is deleted. To remove a Nitro badge, use `/badge nitro remove`.";
+    return "Use `/badge remove` and select the custom badge you want to delete. For a Jadges Nitro badge, use `/badge nitro remove`.";
   }
 
   if (
@@ -205,7 +322,7 @@ function supportResponse(rawContent: string): string | undefined {
       "placement",
     ])
   ) {
-    return "Run `/badge rearrange` to receive a private rearrangement link. Open it and authorize the same Discord account that ran the command. The link expires after 30 minutes, and the page lets you change badge order and profile placement.";
+    return "Run `/badge rearrange` to receive a private link. Authorize the same Discord account that ran the command. The link expires after 30 minutes and lets you change badge order and profile placement.";
   }
 
   if (
@@ -217,7 +334,7 @@ function supportResponse(rawContent: string): string | undefined {
       "my badges",
     ])
   ) {
-    return "Run `/badge list` to see your Jadges badges and whether any are still pending. You can also select another user with the command to view their Jadges badge list.";
+    return "Run `/badge list` to see your badges and whether any are pending. You can optionally select another user.";
   }
 
   if (
@@ -230,7 +347,7 @@ function supportResponse(rawContent: string): string | undefined {
       "visible to",
     ])
   ) {
-    return "Jadges badges are client-side profile additions. They are visible to people using the Jadges plugin. Users without the plugin will continue to see the normal Discord profile without the custom Jadges badges.";
+    return "Jadges badges are visible to users with the Jadges plugin installed. People without the plugin see the normal Discord profile without Jadges customizations.";
   }
 
   if (
@@ -243,37 +360,162 @@ function supportResponse(rawContent: string): string | undefined {
       "cannot submit",
     ])
   ) {
-    return "A submission can fail if your account is blocked from submitting, the badge name contains a restricted word, you already have a badge with the same name, the image is unsupported or over 5 MB, or you reached your badge limit. Share the exact error message here so staff can identify which one applies.";
+    return "A submission can fail because the account is blocked, the name contains a restricted word, the same name already exists, the image is unsupported or over 5 MB, or the badge limit was reached. Send the exact error message so it can be narrowed down.";
   }
 
   if (includesAny(text, ["website", "site", "link", "url", "presets page"])) {
-    return `The Jadges website is ${config.publicUrl}. The Presets marketplace is ${config.publicUrl}/presets.`;
+    return `Jadges website: ${config.publicUrl}\nPresets: ${config.publicUrl}/presets`;
   }
 
-  if (!soundsLikeQuestion(text)) return undefined;
+  return undefined;
+}
 
-  return "I’m not completely sure which Jadges feature you mean. Please include what you were trying to do, the command or page you used, and the exact error you received. I can help with custom badges, approvals, Presets, Nitro badges, badge limits, visibility, removal, and rearranging.";
+function historyKey(message: Message): string {
+  return `${message.guildId || "dm"}:${message.author.id}`;
+}
+
+function getHistory(key: string): ConversationTurn[] {
+  const history = conversationHistory.get(key);
+  if (!history || Date.now() - history.updatedAt > HISTORY_TTL_MS) {
+    conversationHistory.delete(key);
+    return [];
+  }
+  return history.turns;
+}
+
+function rememberExchange(
+  key: string,
+  userContent: string,
+  assistantContent: string,
+): void {
+  const turns = [
+    ...getHistory(key),
+    { role: "user" as const, content: userContent },
+    { role: "assistant" as const, content: assistantContent },
+  ].slice(-MAX_HISTORY_TURNS);
+
+  conversationHistory.set(key, {
+    updatedAt: Date.now(),
+    turns,
+  });
+}
+
+function extractOpenAIText(payload: OpenAIResponsePayload): string | undefined {
+  if (typeof payload.output_text === "string" && payload.output_text.trim()) {
+    return payload.output_text.trim();
+  }
+
+  const parts: string[] = [];
+  for (const item of payload.output || []) {
+    if (item.type !== "message") continue;
+    for (const content of item.content || []) {
+      if (content.type === "output_text" && content.text?.trim()) {
+        parts.push(content.text.trim());
+      }
+    }
+  }
+
+  const combined = parts.join("\n").trim();
+  return combined || undefined;
+}
+
+function cleanDiscordReply(text: string): string {
+  const cleaned = text
+    .replace(/@everyone/gi, "@ everyone")
+    .replace(/@here/gi, "@ here")
+    .trim();
+  return cleaned.length <= 1_800 ? cleaned : `${cleaned.slice(0, 1_797)}...`;
+}
+
+async function askSupportAI(
+  key: string,
+  userContent: string,
+): Promise<string | undefined> {
+  if (!OPENAI_API_KEY) return undefined;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: OPENAI_SUPPORT_MODEL,
+        instructions: SUPPORT_INSTRUCTIONS,
+        input: [
+          ...getHistory(key).map((turn) => ({
+            role: turn.role,
+            content: turn.content,
+          })),
+          {
+            role: "user",
+            content: userContent,
+          },
+        ],
+        max_output_tokens: 350,
+        store: false,
+      }),
+    });
+
+    const payload = (await response.json()) as OpenAIResponsePayload;
+    if (!response.ok) {
+      console.error(
+        `Jadges support AI request failed (${response.status}):`,
+        payload.error?.message || "Unknown OpenAI API error",
+      );
+      return undefined;
+    }
+
+    const answer = extractOpenAIText(payload);
+    return answer ? cleanDiscordReply(answer) : undefined;
+  } catch (error) {
+    console.error("Jadges support AI request failed:", error);
+    return undefined;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function answerSupportMessage(message: Message): Promise<void> {
   if (message.channelId !== SUPPORT_CHANNEL_ID) return;
   if (message.author.bot || message.system || message.webhookId) return;
 
-  const response = supportResponse(message.content);
-  if (!response) return;
+  const normalized = normalizeMessage(message.content);
+  if (!normalized || isAcknowledgement(normalized)) return;
 
+  const key = historyKey(message);
   const now = Date.now();
-  const previous = lastReplyAt.get(message.author.id) || 0;
-  if (now - previous < USER_COOLDOWN_MS) return;
-  lastReplyAt.set(message.author.id, now);
+  const previous = lastReplyAt.get(key) || 0;
+  if (now - previous < USER_COOLDOWN_MS || activeRequests.has(key)) return;
 
-  await message.reply({
-    content: response,
-    allowedMentions: {
-      parse: [],
-      repliedUser: false,
-    },
-  });
+  const immediate = deterministicResponse(message.content);
+  if (!immediate && !soundsLikeSupportRequest(normalized)) return;
+
+  activeRequests.add(key);
+  lastReplyAt.set(key, now);
+
+  try {
+    const response =
+      immediate
+      || (await askSupportAI(key, message.content))
+      || "I could not confidently answer that yet. Please include what you were trying to do, which client you use (Vencord, Revenge, or Kettu), and any exact error message or screenshot so staff can help.";
+
+    rememberExchange(key, message.content, response);
+    await message.reply({
+      content: response,
+      allowedMentions: {
+        parse: [],
+        repliedUser: false,
+      },
+    });
+  } finally {
+    activeRequests.delete(key);
+  }
 }
 
 export async function startJadgesSupportBot(): Promise<JadgesSupportBotHandle> {
@@ -294,6 +536,11 @@ export async function startJadgesSupportBot(): Promise<JadgesSupportBotHandle> {
   client.on(Events.MessageCreate, onMessage);
   client.once(Events.ClientReady, (readyClient) => {
     console.log(`Jadges support responder connected as ${readyClient.user.tag}.`);
+    console.log(
+      OPENAI_API_KEY
+        ? `Jadges AI support enabled with ${OPENAI_SUPPORT_MODEL}.`
+        : "Jadges AI support is disabled because OPENAI_API_KEY is not set.",
+    );
   });
 
   try {
