@@ -65,8 +65,15 @@ function supportResponse(rawContent: string): string | undefined {
   }
 
   if (
-    includesAny(text, ["what is jadges", "what does jadges", "what's jadges", "whats jadges"])
-    || (text.includes("jadges") && includesAny(text, ["about", "purpose", "do"普]))
+    includesAny(text, [
+      "what is jadges",
+      "what does jadges",
+      "what's jadges",
+      "whats jadges",
+      "tell me about jadges",
+      "jadges purpose",
+      "jadges bot",
+    ])
   ) {
     return "Jadges lets people create and equip custom Discord profile badges. Approved badges appear on your profile for people who have the Jadges plugin installed. Jadges also includes community Presets, Nitro badge presets, badge rearranging, profile placement controls, and a public badge leaderboard.";
   }
