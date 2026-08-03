@@ -167,19 +167,25 @@ function forwardedRequestOrigin(request: IncomingMessage): string | undefined {
 }
 
 export function originAllowed(request: IncomingMessage, origin: string): boolean {
-  const suppliedHeader = firstHeaderValue(request.headers.origin);
-  if (!suppliedHeader) return true;
-
-  const supplied = normalizedOrigin(suppliedHeader);
-  if (!supplied) return false;
-
   const allowed = new Set([
     normalizedOrigin(origin),
     normalizedOrigin(config.publicUrl),
     forwardedRequestOrigin(request),
   ].filter((value): value is string => Boolean(value)));
 
-  return allowed.has(supplied);
+  const suppliedHeader = firstHeaderValue(request.headers.origin);
+  const supplied = normalizedOrigin(suppliedHeader);
+  if (supplied && allowed.has(supplied)) return true;
+
+  const referer = normalizedOrigin(firstHeaderValue(request.headers.referer));
+  if (referer && allowed.has(referer)) return true;
+
+  const fetchSite = firstHeaderValue(request.headers["sec-fetch-site"]);
+  if (fetchSite === "same-origin") return true;
+
+  // Older clients may omit all three headers. The signed SameSite session cookie
+  // and server-side owner check still protect the destructive action.
+  return !suppliedHeader && !request.headers.referer && !fetchSite;
 }
 
 export async function readJson(request: IncomingMessage): Promise<unknown> {
