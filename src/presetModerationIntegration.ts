@@ -191,7 +191,7 @@ async function dmOutcome(
         .setTitle(outcome === "approved" ? "Your preset was accepted!" : "Your preset was denied")
         .setDescription(
           outcome === "approved"
-            ? `**${preset.name}** is now available on the Jadges Presets website.`
+            ? `Great news! Your preset **${preset.name}** has been reviewed and approved by the Jadges staff team. It is now live on the Jadges Presets website, where members of the community can view it and add it directly to their Jadges profiles.\n\nThank you for contributing to Jadges and helping the Presets collection grow! You can view your preset and explore the community collection on the [Jadges Presets website](${config.publicUrl}/presets).`
             : `**${preset.name}** was not accepted and has not been added to the Jadges Presets website.`,
         )
         .setColor(outcome === "approved" ? 0x57f287 : 0xed4245)],
