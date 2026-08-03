@@ -25,7 +25,7 @@ Only users with the Jadges plugin installed can see Jadges customizations.
 - Staff approval and denial buttons
 - Badge limits, booster slots, and badge-name filtering
 - Vencord, Revenge, and Kettu support
-- Dedicated Discord support responder with optional AI understanding and conversation memory
+- Dedicated Discord support responder with optional Groq AI understanding, a comprehensive Jadges knowledge base, and conversation memory
 
 ## Commands
 
@@ -34,6 +34,7 @@ Only users with the Jadges plugin installed can see Jadges customizations.
 /badge remove badge:<your badge>
 /badge delete user:<user> badge:<badge> reason:<reason>
 /badge rearrange
+/badge staff badge:<admin|default>
 /badge list [user]
 /badge nitro set preset:<tier>
 /badge nitro remove
@@ -41,9 +42,11 @@ Only users with the Jadges plugin installed can see Jadges customizations.
 /badge unblock user:<user>
 ```
 
-`/badge delete` is staff-only. Its badge field uses autocomplete after a user is selected. The deleted user receives a DM containing the reason.
+`/badge delete`, `/badge block`, and `/badge unblock` are staff-only. The delete command's badge field uses autocomplete after a user is selected. The deleted user receives a DM containing the reason when DMs are available.
 
-`/badge rearrange` returns an ephemeral, expiring link. The page requires Discord OAuth and only accepts the same Discord account that ran the command. The Jaycord Staff badge remains pinned first.
+`/badge rearrange` returns an ephemeral, expiring link. The page requires Discord OAuth and only accepts the same Discord account that ran the command. The Jaycord Staff or Admin badge remains pinned first.
+
+`/badge staff` is available to eligible Jaycord staff. The Admin option requires the Jaycord Admin role; Default restores the normal Jaycord Staff badge.
 
 ## Discord OAuth setup
 
@@ -90,13 +93,16 @@ BLACKLISTED_WORDS
 MAX_BADGES
 EXTRA_BOOST_BADGES
 MAX_BADGE_SIZE
-OPENAI_API_KEY
-OPENAI_SUPPORT_MODEL
+GROQ_API_KEY
+GROQ_SUPPORT_MODEL
+GROQ_BASE_URL
 ```
 
-`OPENAI_API_KEY` enables the support channel's AI fallback for naturally worded questions and follow-up messages that are not covered by the built-in Jadges answers. `OPENAI_SUPPORT_MODEL` defaults to `gpt-5-mini`.
+`GROQ_API_KEY` enables natural-language support replies and follow-up understanding through Groq's OpenAI-compatible Chat Completions API. `GROQ_SUPPORT_MODEL` defaults to `llama-3.3-70b-versatile`. `GROQ_BASE_URL` defaults to `https://api.groq.com/openai/v1`.
 
-Enable **Server Members Intent** in the Discord Developer Portal so the automatic Jaycord Staff role badge can sync. Enable **Message Content Intent** so the support responder can read support-channel messages.
+The Groq system prompt is generated from `src/supportKnowledge.ts`. It contains confirmed Jadges information about the server, supported clients, installation, commands, roles, review flow, limits, Nitro tiers, Presets, OAuth security, staff badges, the leaderboard, troubleshooting, official links, and subjects the AI must not guess about.
+
+Enable **Server Members Intent** in the Discord Developer Portal so automatic Jaycord role badges can sync. Enable **Message Content Intent** so the support responder can read support-channel messages.
 
 ## Vencord
 
@@ -132,4 +138,4 @@ The Kettu build uses Kettu's Vendetta compatibility APIs for profile badge rende
 
 OAuth access is limited to the `identify` scope. Rearrangement links expire, are bound to the Discord user who ran the command, and require a signed session cookie before badge data can be changed. If a different Discord account attempts to open or authorize a rearrangement link, Jadges terminates that exact link and sends the original owner a security-alert DM.
 
-The AI support fallback does not need Discord tokens or user secrets in message content. Users should never share bot tokens, API keys, passwords, session cookies, or other secrets in the support channel.
+The Groq support fallback sends the support question and a short recent conversation history to the configured Groq API so it can answer naturally. Users should never share bot tokens, API keys, passwords, session cookies, OAuth codes, or other secrets in the support channel.
