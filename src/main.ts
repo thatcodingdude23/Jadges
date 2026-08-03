@@ -13,6 +13,7 @@ import { installPartnerBadgeIntegration } from "./partnerBadgeIntegration.js";
 import { installPresetMarketplaceIntegration } from "./presetIntegration.js";
 import { installPresetModerationDiscord, installPresetModerationWebsite } from "./presetModerationIntegration.js";
 import { installPresetOwnerDeleteIntegration } from "./presetOwnerDeleteIntegration.js";
+import { startPresetReleaseAnnouncement } from "./presetReleaseAnnouncement.js";
 import { installPreviewIntegration } from "./previewIntegration.js";
 import { installProfileVisibilityReportIntegration } from "./profileVisibilityReportIntegration.js";
 import { installRearrangeSecurity } from "./rearrangeSecurity.js";
@@ -44,11 +45,13 @@ const server = startServer();
 const client = await startDiscordBot();
 await installBadgeDeleteUserIdSupport(client);
 installPresetModerationDiscord(client);
+const presetReleaseAnnouncement = startPresetReleaseAnnouncement(client);
 const statusPanel = startStatusPanel(client);
 const badgeLeaderboard = startAnnouncementBadgeLeaderboard(client);
 
 async function shutdown(signal: string): Promise<void> {
   console.log(`Received ${signal}; shutting down.`);
+  presetReleaseAnnouncement.stop();
   badgeLeaderboard.stop();
   await statusPanel.stop(true);
   server.close();
