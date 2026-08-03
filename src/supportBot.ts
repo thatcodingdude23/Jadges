@@ -198,7 +198,6 @@ async function answerSupportMessage(message: Message): Promise<void> {
   if (now - previous < USER_COOLDOWN_MS) return;
   lastReplyAt.set(message.author.id, now);
 
-  await message.channel.sendTyping().catch(() => undefined);
   await message.reply({
     content: response,
     allowedMentions: {
