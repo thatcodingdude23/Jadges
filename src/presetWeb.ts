@@ -140,9 +140,46 @@ export function sendJson(response: ServerResponse, status: number, body: unknown
   response.end(JSON.stringify(body));
 }
 
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return raw?.split(",")[0]?.trim() || undefined;
+}
+
+function normalizedOrigin(value: string | undefined): string | undefined {
+  if (!value || value === "null") return undefined;
+  try {
+    return new URL(value).origin;
+  } catch {
+    return undefined;
+  }
+}
+
+function forwardedRequestOrigin(request: IncomingMessage): string | undefined {
+  const host = firstHeaderValue(request.headers["x-forwarded-host"])
+    || firstHeaderValue(request.headers.host);
+  if (!host || !/^[a-z0-9.-]+(?::\d+)?$/i.test(host)) return undefined;
+
+  const forwardedProto = firstHeaderValue(request.headers["x-forwarded-proto"]);
+  const protocol = forwardedProto === "http" || forwardedProto === "https"
+    ? forwardedProto
+    : "https";
+  return normalizedOrigin(`${protocol}://${host}`);
+}
+
 export function originAllowed(request: IncomingMessage, origin: string): boolean {
-  const supplied = request.headers.origin;
-  return !supplied || supplied === origin || supplied === config.publicUrl;
+  const suppliedHeader = firstHeaderValue(request.headers.origin);
+  if (!suppliedHeader) return true;
+
+  const supplied = normalizedOrigin(suppliedHeader);
+  if (!supplied) return false;
+
+  const allowed = new Set([
+    normalizedOrigin(origin),
+    normalizedOrigin(config.publicUrl),
+    forwardedRequestOrigin(request),
+  ].filter((value): value is string => Boolean(value)));
+
+  return allowed.has(supplied);
 }
 
 export async function readJson(request: IncomingMessage): Promise<unknown> {
