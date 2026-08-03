@@ -11,13 +11,22 @@ interface UserProfileStoreLike {
     takeSnapshot(): Record<string, UserProfileLike>;
 }
 
+interface PublicJadgesBadgeLike {
+    key?: string;
+    badge?: string;
+    metadata?: boolean;
+}
+
 type VisibilityResponse = Record<string, string[]>;
+type BadgeResponse = Record<string, PublicJadgesBadgeLike[]>;
 
 const DEFAULT_API_URL = "https://jadges.onrender.com/badges.json";
 const REFRESH_INTERVAL = 5_000;
 const UserProfileStore = findStoreLazy("UserProfileStore") as UserProfileStoreLike;
 
 let visibilityData: VisibilityResponse = {};
+let customBadgeOwners = new Map<string, string>();
+let customImageOwners = new Map<string, string>();
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
 let observer: MutationObserver | undefined;
 
@@ -81,6 +90,31 @@ function imageIdentity(value: string | undefined): string {
     return hash?.toLowerCase() || value.split("?")[0]!.toLowerCase();
 }
 
+function updateCustomBadgeOwners(value: unknown): void {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+
+    const nextKeyOwners = new Map<string, string>();
+    const nextImageOwners = new Map<string, string>();
+
+    for (const [userId, rawBadges] of Object.entries(value as BadgeResponse)) {
+        if (!Array.isArray(rawBadges)) continue;
+
+        for (const badge of rawBadges) {
+            if (!badge || badge.metadata || typeof badge.key !== "string") continue;
+            if (!badge.key.startsWith("custom:")) continue;
+
+            nextKeyOwners.set(badge.key, userId);
+            if (typeof badge.badge === "string") {
+                const identity = imageIdentity(badge.badge);
+                if (identity) nextImageOwners.set(identity, userId);
+            }
+        }
+    }
+
+    customBadgeOwners = nextKeyOwners;
+    customImageOwners = nextImageOwners;
+}
+
 function currentProfileUserId(): string | undefined {
     try {
         const rendered = new Set(
@@ -117,6 +151,19 @@ function keyForImage(image: HTMLImageElement, control: HTMLElement): string | un
     return nativeKey(valuesFor(control, image));
 }
 
+function exactOwnerForImage(image: HTMLImageElement, key: string | undefined): string | undefined {
+    if (key?.startsWith("custom:")) {
+        const owner = customBadgeOwners.get(key);
+        if (owner) return owner;
+    }
+
+    if (image.classList.contains("jadges-profile-badge-image")) {
+        return customImageOwners.get(imageIdentity(image.currentSrc || image.src));
+    }
+
+    return undefined;
+}
+
 function restoreControl(control: HTMLElement): void {
     if (control.dataset.jadgesVisibilityHidden !== "true") return;
     delete control.dataset.jadgesVisibilityHidden;
@@ -144,17 +191,19 @@ function setControlHidden(control: HTMLElement, shouldHide: boolean): void {
 }
 
 function syncProfileVisibility(): void {
-    const userId = currentProfileUserId();
-    const hidden = new Set(userId && Array.isArray(visibilityData[userId])
-        ? visibilityData[userId]
-        : []);
+    const fallbackUserId = currentProfileUserId();
 
     document
         .querySelectorAll<HTMLImageElement>('[data-jadges-key], img[class*="badge"]')
         .forEach(image => {
             const control = controlForImage(image);
             if (!control) return;
+
             const key = keyForImage(image, control);
+            const userId = exactOwnerForImage(image, key) || fallbackUserId;
+            const hidden = new Set(userId && Array.isArray(visibilityData[userId])
+                ? visibilityData[userId]
+                : []);
             setControlHidden(control, Boolean(key && hidden.has(key)));
         });
 }
@@ -167,15 +216,30 @@ function restoreAll(): void {
 
 async function refreshVisibility(): Promise<void> {
     try {
-        const response = await fetch(`${apiRoot()}/visibility.json`, {
-            cache: "no-store",
-            credentials: "omit"
-        });
-        if (!response.ok) throw new Error(`Jadges visibility returned HTTP ${response.status}`);
-        const data: unknown = await response.json();
-        visibilityData = data && typeof data === "object" && !Array.isArray(data)
-            ? data as VisibilityResponse
+        const [visibilityResponse, badgeResponse] = await Promise.all([
+            fetch(`${apiRoot()}/visibility.json`, {
+                cache: "no-store",
+                credentials: "omit"
+            }),
+            fetch(normalizeApiUrl(Settings.plugins.JadgesBadges?.apiUrl), {
+                cache: "no-store",
+                credentials: "omit"
+            })
+        ]);
+
+        if (!visibilityResponse.ok) {
+            throw new Error(`Jadges visibility returned HTTP ${visibilityResponse.status}`);
+        }
+
+        const visibility: unknown = await visibilityResponse.json();
+        visibilityData = visibility && typeof visibility === "object" && !Array.isArray(visibility)
+            ? visibility as VisibilityResponse
             : {};
+
+        if (badgeResponse.ok) {
+            updateCustomBadgeOwners(await badgeResponse.json());
+        }
+
         syncProfileVisibility();
     } catch (error) {
         console.warn("[JadgesBadges] Could not synchronize hidden badges:", error);
@@ -197,5 +261,7 @@ export function stopVisibilitySync(): void {
     observer?.disconnect();
     observer = undefined;
     visibilityData = {};
+    customBadgeOwners.clear();
+    customImageOwners.clear();
     restoreAll();
 }
