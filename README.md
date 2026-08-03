@@ -25,6 +25,7 @@ Only users with the Jadges plugin installed can see Jadges customizations.
 - Staff approval and denial buttons
 - Badge limits, booster slots, and badge-name filtering
 - Vencord, Revenge, and Kettu support
+- Dedicated Discord support responder with optional AI understanding and conversation memory
 
 ## Commands
 
@@ -89,17 +90,25 @@ BLACKLISTED_WORDS
 MAX_BADGES
 EXTRA_BOOST_BADGES
 MAX_BADGE_SIZE
+OPENAI_API_KEY
+OPENAI_SUPPORT_MODEL
 ```
 
-Enable **Server Members Intent** in the Discord Developer Portal so the automatic Jaycord Staff role badge can sync.
+`OPENAI_API_KEY` enables the support channel's AI fallback for naturally worded questions and follow-up messages that are not covered by the built-in Jadges answers. `OPENAI_SUPPORT_MODEL` defaults to `gpt-5-mini`.
+
+Enable **Server Members Intent** in the Discord Developer Portal so the automatic Jaycord Staff role badge can sync. Enable **Message Content Intent** so the support responder can read support-channel messages.
 
 ## Vencord
+
+Jadges is a custom Vencord userplugin, not a plugin from Vencord's normal built-in plugin list.
 
 Copy this folder into `Vencord/src/userplugins/` and rebuild Vencord:
 
 ```text
 vencord-plugin/jadgesBadges/
 ```
+
+Restart Discord, open **Vencord Settings → Plugins**, search for **JadgesBadges**, and enable it.
 
 ## Revenge
 
@@ -122,3 +131,5 @@ The Kettu build uses Kettu's Vendetta compatibility APIs for profile badge rende
 ## Privacy and security
 
 OAuth access is limited to the `identify` scope. Rearrangement links expire, are bound to the Discord user who ran the command, and require a signed session cookie before badge data can be changed. If a different Discord account attempts to open or authorize a rearrangement link, Jadges terminates that exact link and sends the original owner a security-alert DM.
+
+The AI support fallback does not need Discord tokens or user secrets in message content. Users should never share bot tokens, API keys, passwords, session cookies, or other secrets in the support channel.
