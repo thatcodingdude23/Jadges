@@ -8,6 +8,7 @@ import {
   presetImagePath,
   type PresetRecord,
 } from "./presetStore.js";
+import { mutateStore } from "./store.js";
 import {
   discordBotUser,
   originAllowed,
@@ -32,7 +33,8 @@ let installed = false;
 
 function ownerDeleteForm(presetId: string): string {
   return `<form method="post" action="/api/presets/${encodeURIComponent(presetId)}/delete">
-    <button class="secondary-button" type="submit">Delete Preset</button>
+    <button class="secondary-button" type="submit">Delete Preset Everywhere</button>
+    <p class="preset-claim-message">This also removes the badge from every profile that claimed it.</p>
   </form>`;
 }
 
@@ -55,6 +57,37 @@ async function removeModerationEntry(presetId: string): Promise<void> {
   }
 }
 
+async function removeClaimedPresetBadges(presetId: string): Promise<number> {
+  const badgeIdPrefix = `preset-${presetId}-`;
+  const filenames = await mutateStore((data) => {
+    const removedFilenames: string[] = [];
+
+    for (const user of Object.values(data.users)) {
+      const removedOrderKeys = new Set<string>();
+      user.badges = user.badges.filter((badge) => {
+        if (!badge.id.startsWith(badgeIdPrefix)) return true;
+        removedFilenames.push(badge.filename);
+        removedOrderKeys.add(`custom:${badge.id}`);
+        return false;
+      });
+
+      if (removedOrderKeys.size > 0 && user.badgeOrder) {
+        user.badgeOrder = user.badgeOrder.filter((key) => !removedOrderKeys.has(key));
+        if (user.badgeOrder.length === 0) delete user.badgeOrder;
+      }
+    }
+
+    return removedFilenames;
+  });
+
+  await Promise.all(
+    filenames.map((filename) =>
+      rm(path.join(config.imagesDir, path.basename(filename)), { force: true }),
+    ),
+  );
+  return filenames.length;
+}
+
 async function deleteOwnedPreset(userId: string, presetId: string): Promise<PresetRecord> {
   let deleted: PresetRecord | undefined;
   const operation = deleteQueue.then(async () => {
@@ -69,6 +102,8 @@ async function deleteOwnedPreset(userId: string, presetId: string): Promise<Pres
     if (preset.uploaderId !== userId) {
       throw new Error("You can only delete presets that you uploaded");
     }
+
+    await removeClaimedPresetBadges(presetId);
 
     raw.presets.splice(index, 1);
     const temporary = `${PRESET_STORE_FILE}.${process.pid}.${Date.now()}.tmp`;
