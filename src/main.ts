@@ -19,6 +19,7 @@ import { installProfileVisibilityReportIntegration } from "./profileVisibilityRe
 import { installRearrangeSecurity } from "./rearrangeSecurity.js";
 import { startServer } from "./server.js";
 import { startStatusPanel } from "./statusPanel.js";
+import { startJadgesSupportBot } from "./supportBot.js";
 import { installVisibilityIntegration } from "./visibilityIntegration.js";
 import { installWebsiteIntegration } from "./websiteIntegration.js";
 
@@ -43,6 +44,7 @@ installPresetMarketplaceIntegration();
 installRearrangeSecurity();
 const server = startServer();
 const client = await startDiscordBot();
+const supportBot = await startJadgesSupportBot();
 await installBadgeDeleteUserIdSupport(client);
 installPresetModerationDiscord(client);
 const presetReleaseAnnouncement = startPresetReleaseAnnouncement(client);
@@ -51,6 +53,7 @@ const badgeLeaderboard = startAnnouncementBadgeLeaderboard(client);
 
 async function shutdown(signal: string): Promise<void> {
   console.log(`Received ${signal}; shutting down.`);
+  supportBot.stop();
   presetReleaseAnnouncement.stop();
   badgeLeaderboard.stop();
   await statusPanel.stop(true);
