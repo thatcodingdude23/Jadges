@@ -2,11 +2,17 @@ import http, { type RequestListener, type ServerResponse } from "node:http";
 import { config } from "./config.js";
 import { presetCssAsset, presetJsAsset } from "./presetAssetsSmall.js";
 import { handlePresetRequest } from "./presetMarketplace.js";
+import { presetUploadPermissionFixScript } from "./presetUploadPermissionFix.js";
 
 let installed = false;
 
 function serveAsset(response: ServerResponse, kind: "css" | "js"): void {
-  const content = kind === "css" ? presetCssAsset : presetJsAsset;
+  const content = kind === "css"
+    ? presetCssAsset
+    : Buffer.concat([
+        presetJsAsset,
+        Buffer.from(`\n${presetUploadPermissionFixScript}\n`, "utf8"),
+      ]);
   response.writeHead(200, {
     "content-type": kind === "css"
       ? "text/css; charset=utf-8"
