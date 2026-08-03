@@ -108,7 +108,12 @@ function looksLikeSupportRequest(text: string): boolean {
       "problem",
       "support",
       "rearrange",
+      "rearrangement",
       "profile",
+      "private link",
+      "share link",
+      "send link",
+      "is this safe",
     ])
   );
 }
@@ -136,12 +141,69 @@ function isBadgeRemovalQuestion(text: string): boolean {
   );
 }
 
+function isRearrangementLinkSafetyQuestion(text: string): boolean {
+  const mentionsRearrangementLink =
+    /\b(?:rearrange|rearrangement)\b/.test(text)
+    && /\b(?:link|url|ticket)\b/.test(text);
+
+  if (!mentionsRearrangementLink) return false;
+
+  return includesAny(text, [
+    "send",
+    "share",
+    "give",
+    "someone",
+    "anyone",
+    "friend",
+    "asked me",
+    "told me",
+    "should i",
+    "is it safe",
+    "safe to",
+    "can i post",
+    "can i dm",
+    "staff asked",
+  ]);
+}
+
+function isSecretSharingQuestion(text: string): boolean {
+  const mentionsSecret = includesAny(text, [
+    "api key",
+    "bot token",
+    "discord token",
+    "password",
+    "session cookie",
+    "oauth code",
+    "private key",
+  ]);
+  const mentionsSharing = includesAny(text, [
+    "send",
+    "share",
+    "give",
+    "post",
+    "dm",
+    "asked me",
+    "told me",
+    "should i",
+  ]);
+  return mentionsSecret && mentionsSharing;
+}
+
 function deterministicResponse(rawContent: string): string | undefined {
   const text = normalizeMessage(rawContent);
   if (!text || isAcknowledgement(text)) return undefined;
 
   if (isGreeting(text)) {
     return "Hey! Ask me anything about Jadges, including plugin installation, badges, approvals, Presets, Nitro appearances, visibility, removal, or rearranging your profile.";
+  }
+
+  // Security decisions must run before broad keyword answers such as "rearrange".
+  if (isRearrangementLinkSafetyQuestion(text)) {
+    return "**No — never send or share your Jadges rearrangement link with anyone, even if they claim to be staff.** It is a private, temporary link tied to your Discord account. Open it only yourself and authorize with the same account that ran `/badge rearrange`. If you already shared it, stop using that link, generate a fresh one with `/badge rearrange`, and tell staff who requested it.";
+  }
+
+  if (isSecretSharingQuestion(text)) {
+    return "**Do not send or share that secret.** Jadges staff and the support bot will never need your API key, bot token, password, session cookie, OAuth code, or private key. Remove it anywhere you posted it and rotate or regenerate it immediately.";
   }
 
   if (
@@ -295,6 +357,7 @@ function deterministicResponse(rawContent: string): string | undefined {
   if (
     includesAny(text, [
       "rearrange",
+      "rearrangement",
       "badge order",
       "order badges",
       "move badges",
@@ -303,7 +366,7 @@ function deterministicResponse(rawContent: string): string | undefined {
       "placement",
     ])
   ) {
-    return "Run `/badge rearrange` to receive a private link. Authorize with the same Discord account that ran the command. The link expires after 30 minutes and lets you change badge order and left/right profile placement.";
+    return "Run `/badge rearrange` to receive a private link. Open it only yourself and authorize with the same Discord account that ran the command. Never share the link with anyone. It expires after 30 minutes and lets you change badge order and left/right profile placement.";
   }
 
   if (
