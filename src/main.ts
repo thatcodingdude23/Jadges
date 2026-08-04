@@ -12,6 +12,7 @@ import { installHiddenDashboardIntegration } from "./hiddenDashboardIntegration.
 import { installHiddenPublicBadgeIntegration } from "./hiddenPublicBadgeIntegration.js";
 import { installMobileAppearanceIntegration } from "./mobileAppearanceIntegration.js";
 import { installMobileDashboardIntegration } from "./mobileDashboardIntegration.js";
+import { installMobileQuestBadgeNameIntegration } from "./mobileQuestBadgeNameIntegration.js";
 import { installNativeInventoryIntegration } from "./nativeInventoryIntegration.js";
 import { installPartnerBadgeIntegration } from "./partnerBadgeIntegration.js";
 import { installPresetMarketplaceIntegration } from "./presetIntegration.js";
@@ -34,6 +35,7 @@ installNativeInventoryIntegration();
 installBadgeDeleteIntegration();
 installHiddenDashboardIntegration();
 installHiddenPublicBadgeIntegration();
+installMobileQuestBadgeNameIntegration();
 installPartnerBadgeIntegration();
 installVisibilityIntegration();
 installProfileVisibilityReportIntegration();
