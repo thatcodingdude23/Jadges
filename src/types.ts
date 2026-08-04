@@ -57,6 +57,8 @@ export interface UserRecord {
   nativeBadges?: NativeBadgeObservation[];
   /** Optional system staff badge selection. Missing means the default staff badge. */
   staffBadgeMode?: StaffBadgeMode;
+  /** Permanent Badge Quests that have already awarded their reward. */
+  questClaims?: string[];
 }
 
 export interface StoreData {
