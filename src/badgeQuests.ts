@@ -1,4 +1,4 @@
-import { mkdir, stat } from "node:fs/promises";
+import { mkdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
 import {
@@ -9,13 +9,16 @@ import {
 } from "discord.js";
 import { config } from "./config.js";
 import { listPresets } from "./presetStore.js";
+import { COMPLETED_QUEST_BADGE_PNG_BASE64 } from "./questCompletionAsset.js";
 import { getOrCreateUser, getUser, mutateStore } from "./store.js";
 import type { BadgeRecord, UserRecord } from "./types.js";
 
 const QUEST_SYNC_INTERVAL = 5 * 60 * 1000;
 const QUEST_BADGE_PREFIX = "quest:";
+const COMPLETION_BADGE_ID = "quest:completed-any";
+const COMPLETION_BADGE_FILENAME = "10000000-0000-4000-8000-000000000099.png";
 
-interface QuestDefinition {
+export interface QuestDefinition {
   id: string;
   name: string;
   description: string;
@@ -26,14 +29,16 @@ interface QuestDefinition {
   permanent: boolean;
 }
 
-interface QuestProgress {
+export interface QuestProgress {
   quest: QuestDefinition;
   completed: boolean;
   claimed: boolean;
   progress: string;
+  current: number;
+  target: number;
 }
 
-const QUESTS: QuestDefinition[] = [
+export const QUESTS: QuestDefinition[] = [
   {
     id: "first-badge",
     name: "First Badge",
@@ -121,8 +126,20 @@ function questSvg(quest: QuestDefinition): string {
   </svg>`;
 }
 
-async function ensureQuestAssets(): Promise<void> {
+export async function ensureQuestAssets(): Promise<void> {
   await mkdir(config.imagesDir, { recursive: true });
+
+  const completionDestination = path.join(config.imagesDir, COMPLETION_BADGE_FILENAME);
+  try {
+    const file = await stat(completionDestination);
+    if (!file.isFile() || file.size === 0) throw new Error("Missing completion badge");
+  } catch {
+    await writeFile(
+      completionDestination,
+      Buffer.from(COMPLETED_QUEST_BADGE_PNG_BASE64, "base64"),
+    );
+  }
+
   await Promise.all(QUESTS.map(async (quest) => {
     const destination = path.join(config.imagesDir, quest.filename);
     try {
@@ -145,6 +162,20 @@ function rewardBadge(userId: string, quest: QuestDefinition): BadgeRecord {
     userId,
     name: quest.rewardName,
     filename: quest.filename,
+    mimeType: "image/png",
+    pending: false,
+    createdAt: now,
+    approvedAt: now,
+  };
+}
+
+function completionBadge(userId: string): BadgeRecord {
+  const now = new Date().toISOString();
+  return {
+    id: COMPLETION_BADGE_ID,
+    userId,
+    name: "Quests",
+    filename: COMPLETION_BADGE_FILENAME,
     mimeType: "image/png",
     pending: false,
     createdAt: now,
@@ -178,7 +209,7 @@ async function isBoosting(userId: string): Promise<boolean> {
   }
 }
 
-async function evaluateQuests(userId: string): Promise<QuestProgress[]> {
+export async function evaluateQuests(userId: string): Promise<QuestProgress[]> {
   const [user, presets, boosting] = await Promise.all([
     getUser(userId),
     listPresets(),
@@ -192,25 +223,33 @@ async function evaluateQuests(userId: string): Promise<QuestProgress[]> {
 
   return QUESTS.map((quest) => {
     let completed = false;
+    let current = 0;
+    let target = 1;
     let progress = "0/1";
     switch (quest.id) {
       case "first-badge":
-        completed = custom.length >= 1;
-        progress = `${Math.min(custom.length, 1)}/1`;
+        current = Math.min(custom.length, 1);
+        completed = current >= 1;
+        progress = `${current}/1`;
         break;
       case "badge-collector":
-        completed = approved.length >= 3;
-        progress = `${Math.min(approved.length, 3)}/3`;
+        target = 3;
+        current = Math.min(approved.length, target);
+        completed = current >= target;
+        progress = `${current}/${target}`;
         break;
       case "preset-explorer":
-        completed = hasClaimedPreset;
-        progress = `${completed ? 1 : 0}/1`;
+        current = hasClaimedPreset ? 1 : 0;
+        completed = current === 1;
+        progress = `${current}/1`;
         break;
       case "preset-creator":
-        completed = createdPreset;
-        progress = `${completed ? 1 : 0}/1`;
+        current = createdPreset ? 1 : 0;
+        completed = current === 1;
+        progress = `${current}/1`;
         break;
       case "server-booster":
+        current = boosting ? 1 : 0;
         completed = boosting;
         progress = completed ? "Active" : "Not boosting";
         break;
@@ -222,11 +261,16 @@ async function evaluateQuests(userId: string): Promise<QuestProgress[]> {
         ? claimed.has(quest.id)
         : user.badges.some((badge) => badge.id === questBadgeId(quest.id)),
       progress,
+      current,
+      target,
     };
   });
 }
 
-async function grantCompletedQuests(userId: string, progress: QuestProgress[]): Promise<string[]> {
+export async function grantCompletedQuests(
+  userId: string,
+  progress: QuestProgress[],
+): Promise<string[]> {
   const unlocked: string[] = [];
   await mutateStore((data) => {
     const user = getOrCreateUser(data, userId);
@@ -258,8 +302,28 @@ async function grantCompletedQuests(userId: string, progress: QuestProgress[]): 
       }
       unlocked.push(item.quest.rewardName);
     }
+
+    if (
+      progress.some((item) => item.completed)
+      && !user.badges.some((badge) => badge.id === COMPLETION_BADGE_ID)
+    ) {
+      user.badges.push(completionBadge(userId));
+      user.badgeOrder?.push(`custom:${COMPLETION_BADGE_ID}`);
+      unlocked.push("Quests");
+    }
   });
   return unlocked;
+}
+
+export async function refreshQuestProgress(userId: string): Promise<{
+  progress: QuestProgress[];
+  unlocked: string[];
+}> {
+  await ensureQuestAssets();
+  const before = await evaluateQuests(userId);
+  const unlocked = await grantCompletedQuests(userId, before);
+  const progress = await evaluateQuests(userId);
+  return { progress, unlocked };
 }
 
 export async function handleQuestsCommand(
@@ -267,15 +331,11 @@ export async function handleQuestsCommand(
 ): Promise<void> {
   if (interaction.commandName !== "quests") return;
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-  await ensureQuestAssets();
 
-  const before = await evaluateQuests(interaction.user.id);
-  const unlocked = await grantCompletedQuests(interaction.user.id, before);
-  const after = await evaluateQuests(interaction.user.id);
-
-  const lines = after.map(({ quest, completed, claimed, progress }) => {
+  const { progress, unlocked } = await refreshQuestProgress(interaction.user.id);
+  const lines = progress.map(({ quest, completed, claimed, progress: amount }) => {
     const state = claimed ? "Reward equipped" : completed ? "Completed" : "In progress";
-    return `**${quest.name}** — ${state}\n${quest.description}\nProgress: **${progress}** • Reward: **${quest.rewardName}**`;
+    return `**${quest.name}** — ${state}\n${quest.description}\nProgress: **${amount}** • Reward: **${quest.rewardName}**`;
   });
 
   const embed = new EmbedBuilder()
@@ -284,7 +344,7 @@ export async function handleQuestsCommand(
       `${unlocked.length ? `New rewards: **${unlocked.join(", ")}**\n\n` : ""}${lines.join("\n\n")}`,
     )
     .setColor(0x7c4dff)
-    .setFooter({ text: "Permanent quest rewards can only be earned once. Booster access is synchronized." });
+    .setFooter({ text: "For more information, visit jadges.onrender.com/quests" });
 
   await interaction.editReply({ embeds: [embed] });
 }
