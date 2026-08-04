@@ -20,6 +20,7 @@ import { installPresetOwnerDeleteIntegration } from "./presetOwnerDeleteIntegrat
 import { startPresetReleaseAnnouncement } from "./presetReleaseAnnouncement.js";
 import { installPreviewIntegration } from "./previewIntegration.js";
 import { installProfileVisibilityReportIntegration } from "./profileVisibilityReportIntegration.js";
+import { installQuestBadgeAssetIntegration } from "./questBadgeAssetIntegration.js";
 import { installQuestWebsiteIntegration } from "./questWebsiteIntegration.js";
 import { installRearrangeSecurity } from "./rearrangeSecurity.js";
 import { startServer } from "./server.js";
@@ -29,6 +30,7 @@ import { installVisibilityIntegration } from "./visibilityIntegration.js";
 import { installWebsiteIntegration } from "./websiteIntegration.js";
 
 await mkdir(config.imagesDir, { recursive: true });
+installQuestBadgeAssetIntegration();
 installFinalAssetIntegration();
 installNativeInventoryIntegration();
 installBadgeDeleteIntegration();
