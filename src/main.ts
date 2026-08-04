@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { startAnnouncementBadgeLeaderboard } from "./announcementBadgeLeaderboard.js";
 import { installBadgeDeleteIntegration } from "./badgeDeleteIntegration.js";
 import { installBadgeDeleteUserIdSupport } from "./badgeDeleteUserIdSupport.js";
+import { installBadgeQuests } from "./badgeQuestsIntegration.js";
 import { installBrandIntegration } from "./brandIntegration.js";
 import { config } from "./config.js";
 import { installDesktopThemeIntegration } from "./desktopThemeIntegration.js";
@@ -51,6 +52,7 @@ installPresetMarketplaceIntegration();
 installRearrangeSecurity();
 const server = startServer();
 const client = await startDiscordBot();
+const badgeQuests = await installBadgeQuests(client);
 const supportBot = await startJadgesSupportBot();
 await installBadgeDeleteUserIdSupport(client);
 installPresetModerationDiscord(client);
@@ -60,6 +62,7 @@ const badgeLeaderboard = startAnnouncementBadgeLeaderboard(client);
 
 async function shutdown(signal: string): Promise<void> {
   console.log(`Received ${signal}; shutting down.`);
+  badgeQuests.stop();
   supportBot.stop();
   presetReleaseAnnouncement.stop();
   badgeLeaderboard.stop();
