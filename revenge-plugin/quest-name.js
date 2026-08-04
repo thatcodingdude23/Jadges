@@ -2,7 +2,7 @@
   "use strict";
 
   const QUEST_KEY = "custom:quest:completed-any";
-  const QUEST_MOBILE_NAME = "Completed a Quest";
+  const QUEST_MOBILE_NAME = "Jadges Completed a Quest";
   let originalSafeFetch;
 
   function renameQuestBadge(data) {
