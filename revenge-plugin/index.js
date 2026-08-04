@@ -5,6 +5,8 @@
   const API_ROOT = API_URL.replace(/\/badges\.json(?:\?.*)?$/, "");
   const REFRESH_INTERVAL = 5_000;
   const NATIVE_REPORT_INTERVAL = 60_000;
+  const QUEST_BADGE_KEY = "custom:quest:completed-any";
+  const QUEST_MOBILE_NAME = "Jadges Completed a Quest";
 
   let badgeData = {};
   let settingsData = {};
@@ -352,7 +354,9 @@
 
             if (typeof item.badge !== "string" || !item.badge.startsWith("https://")) return;
             const id = `jadges-${userId}-${index}`;
-            const label = item.tooltip || item.name || "Jadges Badge";
+            const label = item.key === QUEST_BADGE_KEY
+              ? QUEST_MOBILE_NAME
+              : item.tooltip || item.name || "Jadges Badge";
             syntheticBadges.push(
               makeImageBadge(
                 id,
