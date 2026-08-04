@@ -9,6 +9,7 @@ import { startDiscordBot } from "./discord.js";
 import { installFinalAssetIntegration } from "./finalAssetIntegration.js";
 import { installHiddenDashboardIntegration } from "./hiddenDashboardIntegration.js";
 import { installHiddenPublicBadgeIntegration } from "./hiddenPublicBadgeIntegration.js";
+import { installMobileAppearanceIntegration } from "./mobileAppearanceIntegration.js";
 import { installMobileDashboardIntegration } from "./mobileDashboardIntegration.js";
 import { installNativeInventoryIntegration } from "./nativeInventoryIntegration.js";
 import { installPartnerBadgeIntegration } from "./partnerBadgeIntegration.js";
@@ -37,7 +38,8 @@ installProfileVisibilityReportIntegration();
 installDesktopThemeIntegration();
 installPreviewIntegration();
 installBrandIntegration();
-// Install this before the website wrapper so it can transform completed dashboard HTML.
+// Install these before the website wrapper so they can transform completed dashboard HTML.
+installMobileAppearanceIntegration();
 installMobileDashboardIntegration();
 installWebsiteIntegration();
 // Install moderation first so its request wrapper is outermost and can intercept
