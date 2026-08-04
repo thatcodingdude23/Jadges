@@ -20,6 +20,7 @@ import { installPresetOwnerDeleteIntegration } from "./presetOwnerDeleteIntegrat
 import { startPresetReleaseAnnouncement } from "./presetReleaseAnnouncement.js";
 import { installPreviewIntegration } from "./previewIntegration.js";
 import { installProfileVisibilityReportIntegration } from "./profileVisibilityReportIntegration.js";
+import { installQuestWebsiteIntegration } from "./questWebsiteIntegration.js";
 import { installRearrangeSecurity } from "./rearrangeSecurity.js";
 import { startServer } from "./server.js";
 import { startStatusPanel } from "./statusPanel.js";
@@ -39,9 +40,10 @@ installProfileVisibilityReportIntegration();
 installDesktopThemeIntegration();
 installPreviewIntegration();
 installBrandIntegration();
-// Install these before the website wrapper so they can transform completed dashboard HTML.
+// Install these before the website wrapper so they can transform or intercept website pages.
 installMobileAppearanceIntegration();
 installMobileDashboardIntegration();
+installQuestWebsiteIntegration();
 installWebsiteIntegration();
 // Install moderation first so its request wrapper is outermost and can intercept
 // preset uploads before the marketplace publishes them. Owner deletion is placed
