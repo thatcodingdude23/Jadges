@@ -50,7 +50,11 @@ function wrap(listener: RequestListener): RequestListener {
       const changed = transform(original);
       response.removeHeader("content-length");
       originalWrite(changed, "utf8");
-      originalEnd(undefined, undefined, callback);
+      if (typeof callback === "function") {
+        originalEnd(callback);
+      } else {
+        originalEnd();
+      }
       return response;
     }) as typeof response.end;
 
