@@ -4,7 +4,7 @@ import path from "node:path";
 import { config } from "./config.js";
 
 const QUEST_BADGE_FILENAME = "10000000-0000-4000-8000-000000000099.png";
-const QUEST_BADGE_VERSION = "2";
+const QUEST_BADGE_URL = "https://cdn.discordapp.com/badge-icons/7d9ae358c8c5e118768335dbe68b4fb8.png";
 
 const mimeExtensions: Record<string, string> = {
   "image/png": ".png",
@@ -54,8 +54,6 @@ export async function deleteStoredImage(filename: string): Promise<void> {
 }
 
 export function publicImageUrl(filename: string, origin = config.publicUrl): string {
-  const base = `${origin.replace(/\/$/, "")}/badges/${encodeURIComponent(filename)}`;
-  return filename === QUEST_BADGE_FILENAME
-    ? `${base}?v=${QUEST_BADGE_VERSION}`
-    : base;
+  if (filename === QUEST_BADGE_FILENAME) return QUEST_BADGE_URL;
+  return `${origin.replace(/\/$/, "")}/badges/${encodeURIComponent(filename)}`;
 }
