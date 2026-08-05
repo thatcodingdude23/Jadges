@@ -7,6 +7,7 @@
 import definePlugin from "@utils/types";
 
 import basePlugin from "./base";
+import { startCustomProfileSync, stopCustomProfileSync } from "./customProfileSync";
 import {
     startNativeInventorySync,
     stopNativeInventorySync
@@ -71,8 +72,6 @@ function prepareNativeBadgeReport(init: RequestInit | undefined): NativeReportDe
             badges?: Array<{ key?: unknown; name?: unknown; image?: unknown; }>;
         };
 
-        // V.27 replaces the old DOM scanner. Only the authoritative inventory
-        // produced from Discord's UserProfileStore is allowed to reach Jadges.
         if (
             payload.authoritative !== true
             || typeof payload.userId !== "string"
@@ -213,6 +212,7 @@ async function startWithoutGlobalBadgeClick(): Promise<void> {
         startVisibilitySync();
         startProfileVisibilityReporter();
         startNativeInventorySync();
+        startCustomProfileSync();
     } finally {
         document.addEventListener = originalAdd;
     }
@@ -220,13 +220,14 @@ async function startWithoutGlobalBadgeClick(): Promise<void> {
 
 export default definePlugin({
     name: "JadgesBadges",
-    description: "Displays Jadges badges, rearranges native Discord badges, syncs account themes, and installs verified Jadges updates.",
+    description: "Displays Jadges badges, cosmetic custom profiles, native badge ordering, themes, and verified updates.",
     authors: [{ name: "Jaycord", id: 0n }],
     dependencies: ["BadgeAPI"],
     options: (basePlugin as any).options,
     start: startWithoutGlobalBadgeClick,
     stop() {
         try {
+            stopCustomProfileSync();
             stopNativeInventorySync();
             stopProfileVisibilityReporter();
             stopVisibilitySync();
