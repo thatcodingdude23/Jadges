@@ -18,65 +18,74 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Generate manifest and downloadable ZIP
+      - name: Apply v44 source changes and generate package
         run: |
           python3 - <<'PY'
           import hashlib
           import json
+          import re
           import zipfile
           from pathlib import Path
 
-          version = 43
-          root = Path("vencord-plugin/jadgesBadges")
-          names = [
-              "index.tsx",
-              "base.tsx",
-              "customProfileSync.ts",
-              "native.ts",
-              "style.css",
-              "updater.ts",
-              "updateNative.ts",
-          ]
+          version = 44
 
+          index = Path("vencord-plugin/jadgesBadges/index.tsx")
+          text = index.read_text()
+          if "PANEL_USERNAME_SELECTOR" not in text:
+              text = text.replace(
+                  "const USER_TAG_SELECTOR = 'span[class*=\"userTagUsername_\"]';",
+                  "const USER_TAG_SELECTOR = 'span[class*=\"userTagUsername_\"]';\nconst PANEL_USERNAME_SELECTOR = '[class*=\"panelSubtextContainer_\"] [class*=\"hovered_\"]';"
+              )
+              old = '''            if (!scope) continue;\n            for (const userTag of scope.querySelectorAll<HTMLElement>(USER_TAG_SELECTOR)) {\n                if (!userTag.dataset.jadgesOriginalUserTag) {\n                    userTag.dataset.jadgesOriginalUserTag = userTag.textContent?.trim() || original;\n                }\n                userTag.textContent = customName;\n            }\n        }'''
+              new = '''            if (scope) {\n                for (const userTag of scope.querySelectorAll<HTMLElement>(USER_TAG_SELECTOR)) {\n                    if (!userTag.dataset.jadgesOriginalUserTag) {\n                        userTag.dataset.jadgesOriginalUserTag = userTag.textContent?.trim() || original;\n                    }\n                    userTag.textContent = customName;\n                }\n            }\n        }\n\n        for (const panelName of document.querySelectorAll<HTMLElement>(PANEL_USERNAME_SELECTOR)) {\n            const original = panelName.dataset.jadgesPanelOriginalName || panelName.textContent?.trim();\n            if (!original) continue;\n            const userId = matchingProfileId(original, profiles);\n            const customName = userId ? profiles[userId]?.username?.trim() : undefined;\n            if (!customName) continue;\n            if (!panelName.dataset.jadgesPanelOriginalName) panelName.dataset.jadgesPanelOriginalName = original;\n            panelName.textContent = customName;\n        }'''
+              if old not in text:
+                  raise SystemExit("global name scope block not found")
+              text = text.replace(old, new)
+              old_stop = '''    for (const span of document.querySelectorAll<HTMLElement>(DISPLAY_NAME_SELECTOR)) {\n        const original = span.dataset.jadgesGlobalOriginalName;\n        if (!original) continue;\n        span.textContent = original;\n        span.setAttribute("data-username-with-effects", original);\n        delete span.dataset.jadgesGlobalOriginalName;\n    }\n}'''
+              new_stop = '''    for (const span of document.querySelectorAll<HTMLElement>(DISPLAY_NAME_SELECTOR)) {\n        const original = span.dataset.jadgesGlobalOriginalName;\n        if (!original) continue;\n        span.textContent = original;\n        span.setAttribute("data-username-with-effects", original);\n        delete span.dataset.jadgesGlobalOriginalName;\n    }\n    for (const panelName of document.querySelectorAll<HTMLElement>(PANEL_USERNAME_SELECTOR)) {\n        const original = panelName.dataset.jadgesPanelOriginalName;\n        if (!original) continue;\n        panelName.textContent = original;\n        delete panelName.dataset.jadgesPanelOriginalName;\n    }\n}'''
+              if old_stop not in text:
+                  raise SystemExit("global name stop block not found")
+              text = text.replace(old_stop, new_stop)
+              index.write_text(text)
+
+          native = Path("vencord-plugin/jadgesBadges/updateNative.ts")
+          text = native.read_text()
+          old = '''                void updateInstaller(ui, {\n                    percent: progress,\n                    status: "Building Vencord…",\n                    log: `[${source}] ${clean}`,\n                    logType: source === "error" ? "error" : undefined\n                });'''
+          if old in text:
+              new = '''                const actualError = source === "error"\n                    && /(?:^|\\b)(?:error|failed|failure|fatal|exception|enoent|eacces)(?:\\b|:)/i.test(clean);\n                const label = actualError ? "error" : "build";\n                void updateInstaller(ui, {\n                    percent: progress,\n                    status: "Building Vencord…",\n                    log: `[${label}] ${clean}`,\n                    logType: actualError ? "error" : undefined\n                });'''
+              native.write_text(text.replace(old, new))
+
+          updater = Path("vencord-plugin/jadgesBadges/updater.ts")
+          updater.write_text(re.sub(r"const CURRENT_UPDATE_VERSION = \\d+;", "const CURRENT_UPDATE_VERSION = 44;", updater.read_text()))
+
+          server = Path("src/vencordUpdateDashboardIntegration.ts")
+          server.write_text(re.sub(r"const UPDATE_VERSION = \\d+;", "const UPDATE_VERSION = 44;", server.read_text()))
+
+          root = Path("vencord-plugin/jadgesBadges")
+          names = ["index.tsx", "base.tsx", "customProfileSync.ts", "native.ts", "style.css", "updater.ts", "updateNative.ts"]
           manifest = {
               "version": version,
-              "files": [
-                  {
-                      "path": name,
-                      "sha256": hashlib.sha256((root / name).read_bytes()).hexdigest(),
-                  }
-                  for name in names
-              ],
+              "files": [{"path": name, "sha256": hashlib.sha256((root / name).read_bytes()).hexdigest()} for name in names],
           }
+          Path("vencord-plugin/update.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
-          Path("vencord-plugin/update.json").write_text(
-              json.dumps(manifest, indent=2) + "\n",
-              encoding="utf-8",
-          )
-
-          output = Path("dist/jadgesBadges-v43.zip")
+          output = Path("dist/jadgesBadges-v44.zip")
           output.parent.mkdir(parents=True, exist_ok=True)
           with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
               for file in sorted(root.rglob("*")):
                   if file.is_file():
                       archive.write(file, Path("jadgesBadges") / file.relative_to(root))
-              archive.writestr(
-                  "INSTALL.txt",
-                  "1. Close Discord.\n"
-                  "2. Open your Vencord\\src\\userplugins folder.\n"
-                  "3. Delete the old jadgesBadges folder.\n"
-                  "4. Extract the jadgesBadges folder from this ZIP into userplugins.\n"
-                  "5. In the Vencord folder, run: pnpm build\n"
-                  "6. Open Discord again.\n\n"
-                  "This package updates every matching username-effects span and identifies the author as jayden.\n",
-              )
+              archive.writestr("INSTALL.txt", "Install the jadgesBadges folder, run pnpm build, then restart Discord.\n")
+
+          Path(".github/workflows/apply-v44-fix.yml").unlink(missing_ok=True)
+          Path("__trigger_v44").unlink(missing_ok=True)
           PY
 
-      - name: Commit generated package
+      - name: Commit generated v44 package
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add vencord-plugin/update.json dist/jadgesBadges-v43.zip
+          git add -A
           git diff --cached --quiet && exit 0
-          git commit -m "Publish Jadges Vencord v43 ZIP"
+          git commit -m "Publish Jadges Vencord v44 ZIP"
           git push
