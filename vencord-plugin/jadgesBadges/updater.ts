@@ -1,8 +1,7 @@
 import { PluginNative } from "@utils/types";
 
-const CURRENT_UPDATE_VERSION = 31;
-const UPDATE_MANIFEST_URL =
-    "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/vencord-plugin/update.json";
+const CURRENT_UPDATE_VERSION = 32;
+const UPDATE_MANIFEST_URL = "https://jadges.onrender.com/vencord-update.json";
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
 const TOAST_ID = "jadges-update-toast";
 
@@ -21,11 +20,7 @@ function removeToast(): void {
     document.getElementById(TOAST_ID)?.remove();
 }
 
-function text<K extends keyof HTMLElementTagNameMap>(
-    tag: K,
-    className: string,
-    value: string
-): HTMLElementTagNameMap[K] {
+function text<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, value: string): HTMLElementTagNameMap[K] {
     const element = document.createElement(tag);
     element.className = className;
     element.textContent = value;
@@ -45,29 +40,19 @@ function showUpdate(version: number): void {
 
     const header = document.createElement("div");
     header.className = "jadges-update-header";
-
     const heading = document.createElement("div");
     heading.append(
         text("strong", "jadges-update-title", "Jadges update available"),
         text("span", "jadges-update-version", `Version ${version}`)
     );
-
     const close = text("button", "jadges-update-close", "×");
     close.type = "button";
     close.setAttribute("aria-label", "Dismiss Jadges update");
     close.addEventListener("click", removeToast);
     header.append(heading, close);
 
-    const copy = text(
-        "p",
-        "jadges-update-copy",
-        "Install the update inside Discord with a live loading screen, percentage, and build logs."
-    );
-    const status = text(
-        "p",
-        "jadges-update-status",
-        "Discord will pause during installation and restart automatically at 100%."
-    );
+    const copy = text("p", "jadges-update-copy", "Install the update inside Discord with a live loading screen, percentage, and build logs.");
+    const status = text("p", "jadges-update-status", "Discord will pause during installation and restart automatically at 100%.");
     const actions = document.createElement("div");
     actions.className = "jadges-update-actions";
     const install = text("button", "jadges-update-install", "Install update");
@@ -80,7 +65,6 @@ function showUpdate(version: number): void {
         install.textContent = "Opening installer…";
         status.classList.remove("jadges-update-status-error");
         status.textContent = "Switching Discord to the Jadges installer screen…";
-
         try {
             const result = await Native.installLatestUpdate();
             if (!result.ok) throw new Error(result.message || "The update failed.");
@@ -100,21 +84,12 @@ function showUpdate(version: number): void {
 
 async function checkForUpdates(): Promise<void> {
     if (IS_WEB || installing) return;
-
     try {
-        const response = await fetch(`${UPDATE_MANIFEST_URL}?t=${Date.now()}`, {
-            cache: "no-store",
-            credentials: "omit"
-        });
-        if (!response.ok) return;
-
+        const response = await fetch(`${UPDATE_MANIFEST_URL}?t=${Date.now()}`, { cache: "no-store", credentials: "omit" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const manifest = await response.json() as UpdateManifest;
-        if (
-            Number.isSafeInteger(manifest.version)
-            && manifest.version > CURRENT_UPDATE_VERSION
-        ) {
-            showUpdate(manifest.version);
-        }
+        console.info(`[JadgesBadges] Update check: installed ${CURRENT_UPDATE_VERSION}, latest ${manifest.version}`);
+        if (Number.isSafeInteger(manifest.version) && manifest.version > CURRENT_UPDATE_VERSION) showUpdate(manifest.version);
     } catch (error) {
         console.warn("[JadgesBadges] Update check failed:", error);
     }
