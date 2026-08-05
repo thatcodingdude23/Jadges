@@ -1,13 +1,14 @@
 import { PluginNative } from "@utils/types";
 import { UserStore } from "@webpack/common";
 
-const CURRENT_UPDATE_VERSION = 40;
+const CURRENT_UPDATE_VERSION = 41;
 const UPDATE_MANIFEST_URL = "https://jadges.onrender.com/vencord-update.json";
 const PROFILE_URL = "https://jadges.onrender.com/custom-profiles.json";
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
 const PROFILE_REFRESH_INTERVAL = 1_000;
 const TOAST_ID = "jadges-update-toast";
-const USERNAME_SELECTOR = 'span[data-username-with-effects]';
+const DISPLAY_NAME_SELECTOR = 'span[data-username-with-effects]';
+const USER_TAG_SELECTOR = 'span[class*="userTagUsername_"]';
 const MEMBER_SECTION_SELECTOR = 'section[class*="section_"]';
 const PROFILE_ROOT_SELECTOR = '[class*="userProfile"],[class*="profilePopout"],[class*="profileModal"],[role="dialog"],[class*="biteSize"],[class*="fullSize"]';
 
@@ -104,18 +105,24 @@ function ensureOriginalLine(target: HTMLElement, kind: "name" | "date", original
         line = document.createElement("div");
         if (kind === "name") line.dataset.jadgesOriginalName = "true";
         else line.dataset.jadgesOriginalDate = "true";
-        line.style.cssText = "display:block;position:static;font-size:12px;line-height:16px;opacity:.7;margin-top:2px;font-weight:500;pointer-events:none";
+        line.style.cssText = "display:block;position:static;width:100%;flex-basis:100%;font-size:12px;line-height:16px;opacity:.7;margin-top:2px;font-weight:500;pointer-events:none";
         target.insertAdjacentElement("afterend", line);
     }
     line.textContent = `Originally, ${original}`;
 }
-function restoreUsername(target: HTMLElement): void {
-    const original = target.dataset.jadgesOriginalUsername;
+function restoreDisplayName(target: HTMLElement): void {
+    const original = target.dataset.jadgesOriginalDisplayName;
     if (!original) return;
     target.textContent = original;
     target.setAttribute("data-username-with-effects", original);
-    delete target.dataset.jadgesOriginalUsername;
+    delete target.dataset.jadgesOriginalDisplayName;
     target.parentElement?.querySelector(':scope > [data-jadges-original-name]')?.remove();
+}
+function restoreUserTag(target: HTMLElement): void {
+    const original = target.dataset.jadgesOriginalUserTag;
+    if (!original) return;
+    target.textContent = original;
+    delete target.dataset.jadgesOriginalUserTag;
 }
 function exactMemberSinceDate(section: HTMLElement): HTMLElement | undefined {
     const heading = section.querySelector("h2");
@@ -135,23 +142,38 @@ function cleanupOldBlocks(root: HTMLElement): void {
 }
 
 function applyProfiles(): void {
-    for (const target of document.querySelectorAll<HTMLElement>(USERNAME_SELECTOR)) {
-        const root = profileRoot(target);
+    for (const displayTarget of document.querySelectorAll<HTMLElement>(DISPLAY_NAME_SELECTOR)) {
+        const root = profileRoot(displayTarget);
         if (!root) continue;
         cleanupOldBlocks(root);
         const userId = profileUserId(root);
         if (!userId) continue;
         const profile = profiles[userId];
         if (!profile?.username) {
-            restoreUsername(target);
+            restoreDisplayName(displayTarget);
+            root.querySelectorAll<HTMLElement>(USER_TAG_SELECTOR).forEach(restoreUserTag);
             continue;
         }
-        const original = target.dataset.jadgesOriginalUsername || target.getAttribute("data-username-with-effects") || target.textContent?.trim();
-        if (!original) continue;
-        target.dataset.jadgesOriginalUsername = original;
-        target.textContent = profile.username;
-        target.setAttribute("data-username-with-effects", profile.username);
-        ensureOriginalLine(target, "name", original);
+
+        const realUser = UserStore.getUser(userId);
+        const originalDisplayName = displayTarget.dataset.jadgesOriginalDisplayName
+            || displayTarget.getAttribute("data-username-with-effects")
+            || displayTarget.textContent?.trim()
+            || realUser?.globalName
+            || realUser?.username;
+        if (!originalDisplayName) continue;
+
+        displayTarget.dataset.jadgesOriginalDisplayName = originalDisplayName;
+        displayTarget.textContent = profile.username;
+        displayTarget.setAttribute("data-username-with-effects", profile.username);
+        ensureOriginalLine(displayTarget, "name", originalDisplayName);
+
+        for (const userTag of root.querySelectorAll<HTMLElement>(USER_TAG_SELECTOR)) {
+            const originalTag = userTag.dataset.jadgesOriginalUserTag || userTag.textContent?.trim() || realUser?.username;
+            if (!originalTag) continue;
+            userTag.dataset.jadgesOriginalUserTag = originalTag;
+            userTag.textContent = profile.username;
+        }
     }
 
     for (const section of document.querySelectorAll<HTMLElement>(MEMBER_SECTION_SELECTOR)) {
@@ -199,7 +221,12 @@ function stopProfileSync(): void {
     clearInterval(profileTimer);
     profileTimer = undefined;
     profiles = {};
-    applyProfiles();
+    document.querySelectorAll<HTMLElement>(DISPLAY_NAME_SELECTOR).forEach(restoreDisplayName);
+    document.querySelectorAll<HTMLElement>(USER_TAG_SELECTOR).forEach(restoreUserTag);
+    document.querySelectorAll<HTMLElement>(MEMBER_SECTION_SELECTOR).forEach(section => {
+        const date = exactMemberSinceDate(section);
+        if (date) restoreDate(date);
+    });
 }
 async function checkForUpdates(): Promise<void> {
     if (IS_WEB || installing) return;
