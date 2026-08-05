@@ -1,4 +1,4 @@
-export const JADGES_DISCORD_INVITE = "https://discord.gg/jaycord";
+export const JADGES_DISCORD_INVITE = "https://discord.gg/h63eG654F";
 export const VENCORD_PLUGIN_URL =
   "https://github.com/thatcodingdude23/Jadges/tree/main/vencord-plugin/jadgesBadges";
 export const REVENGE_PLUGIN_URL =
