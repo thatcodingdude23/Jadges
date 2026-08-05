@@ -131,7 +131,7 @@ function pageHead(title: string, description: string): string {
 function landingPage(loggedIn: boolean): string {
   const href = loggedIn ? "/dashboard" : "/login";
   const label = loggedIn ? "Open Dashboard" : "Login with Discord";
-  return `<!doctype html><html lang="en">${pageHead("Jadges", "Manage your Jadges badges and cosmetic profile.")}<body class="landing"><nav class="landing-nav"><a class="site-logo" href="/">${logoMarkup()}<span>Jadges</span></a><a class="discord-button" href="${href}">${label}</a></nav><main class="landing-main"><section class="hero-copy"><h1>Your badges.<br><span>Your order.</span><br>Your profile.</h1><p>Arrange badges and customize your cosmetic Jadges identity from one secure dashboard.</p><div class="hero-buttons"><a class="discord-button" href="${href}">${label}</a><a class="secondary-button" href="https://discord.gg/jaycord">Jaycord</a></div></section></main></body></html>`;
+  return `<!doctype html><html lang="en">${pageHead("Jadges", "Manage your Jadges badges and cosmetic profile.")}<body class="landing"><nav class="landing-nav"><a class="site-logo" href="/">${logoMarkup()}<span>Jadges</span></a><a class="discord-button" href="${href}">${label}</a></nav><main class="landing-main"><section class="hero-copy"><h1>Your badges.<br><span>Your order.</span><br>Your profile.</h1><p>Arrange badges and customize your cosmetic Jadges identity from one secure dashboard.</p><div class="hero-buttons"><a class="discord-button" href="${href}">${label}</a><a class="secondary-button" href="https://discord.gg/h63eG654F">Jaycord</a></div></section></main></body></html>`;
 }
 
 function verifiedIcon(): string {
@@ -156,7 +156,7 @@ function dashboardPage(data: DashboardData): string {
     <a class="nav-link" href="#badges"><svg viewBox="0 0 24 24"><path d="m12 3 7 3v5c0 4.6-2.8 8.2-7 10-4.2-1.8-7-5.4-7-10V6l7-3Z"/></svg>Badges</a>
     <a class="nav-link" href="#appearance"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-1 1.5-2-.7-1.5.4-3 2-3h2.2A3.3 3.3 0 0 0 21 12.7 9.7 9.7 0 0 0 12 3Z"/></svg>Appearance</a>
     <a class="nav-link" href="#customprofile"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c.8-4.4 3.5-7 8-7s7.2 2.6 8 7"/><path d="M18 4v4M16 6h4"/></svg>Custom Profile</a>
-  </nav><div class="sidebar-spacer"></div><div class="sidebar-help"><strong>Need help?</strong><p>Join Jaycord for dashboard or plugin support.</p><a href="https://discord.gg/jaycord">Open support server →</a></div><div class="sidebar-foot">Jadges Dashboard • V.1</div></aside>
+  </nav><div class="sidebar-spacer"></div><div class="sidebar-help"><strong>Need help?</strong><p>Join Jaycord for dashboard or plugin support.</p><a href="https://discord.gg/h63eG654F">Open support server →</a></div><div class="sidebar-foot">Jadges Dashboard • V.1</div></aside>
   <main class="app-main" id="dashboard"><header class="topbar"><div class="mobile-brand"><a class="site-logo" href="/">${logoMarkup()}<span>Jadges</span></a></div><div class="account-menu"><img class="account-avatar" src="${safeAvatar}" alt=""><div class="account-copy"><strong>${safeDisplayName}</strong><span>@${safeUsername}</span></div><form action="/logout" method="post"><button class="logout-link" type="submit">Log out</button></form></div></header>
   <div class="dashboard-wrap">
     <div class="dashboard-view" id="dashboard-view">
@@ -240,7 +240,8 @@ async function startWebsiteLogin(response: ServerResponse): Promise<void> {
   if (!config.discordClientSecret) { sendHtml(response, 503, errorPage("Login unavailable", "Discord OAuth has not been configured for Jadges yet.")); return }
   const state = signPayload({ kind: "website-state", expiresAt: Date.now() + WEBSITE_STATE_MS, nonce: randomBytes(12).toString("hex") });
   const authorize = new URL("https://discord.com/oauth2/authorize");
-  authorize.searchParams.set("client_id", config.clientId); authorize.searchParams.set("response_type", "code"); authorize.searchParams.set("redirect_uri", `${config.publicUrl}/oauth/callback`); authorize.searchParams.set("scope", "identify"); authorize.searchParams.set("state", state); authorize.searchParams.set("prompt", "none");
+  authorize.searchParams.set("client_id", config.clientId); authorize.searchParams.set("response_type", "code");
+  authorize.searchParams.set("redirect_uri", `${config.publicUrl}/oauth/callback`); authorize.searchParams.set("scope", "identify"); authorize.searchParams.set("state", state); authorize.searchParams.set("prompt", "none");
   redirect(response, authorize.toString());
 }
 
