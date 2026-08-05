@@ -290,6 +290,13 @@ async function syncAllUsernameEffects(): Promise<void> {
 
             textNode.nodeValue = `${customName} `;
             messageName.setAttribute("data-text", customName);
+
+            for (const suffix of messageName.querySelectorAll<HTMLElement>('[class*="vc-smyn-suffix"]')) {
+                if (!suffix.dataset.jadgesMessageOriginalSuffix) {
+                    suffix.dataset.jadgesMessageOriginalSuffix = suffix.textContent?.trim() || identity;
+                }
+                suffix.textContent = customName;
+            }
         }
 
         for (const nameElement of document.querySelectorAll<HTMLElement>(SURFACE_NAME_SELECTOR)) {
@@ -340,6 +347,12 @@ function stopGlobalCustomNameSync(): void {
         const originalDataText = messageName.dataset.jadgesMessageOriginalDataText;
         if (textNode && originalText) textNode.nodeValue = `${originalText} `;
         if (originalDataText) messageName.setAttribute("data-text", originalDataText);
+        for (const suffix of messageName.querySelectorAll<HTMLElement>('[class*="vc-smyn-suffix"]')) {
+            const originalSuffix = suffix.dataset.jadgesMessageOriginalSuffix;
+            if (!originalSuffix) continue;
+            suffix.textContent = originalSuffix;
+            delete suffix.dataset.jadgesMessageOriginalSuffix;
+        }
         delete messageName.dataset.jadgesMessageOriginalText;
         delete messageName.dataset.jadgesMessageOriginalDataText;
     }
