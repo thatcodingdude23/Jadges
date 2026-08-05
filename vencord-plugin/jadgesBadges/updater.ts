@@ -1,7 +1,7 @@
 import { PluginNative } from "@utils/types";
 import { UserStore } from "@webpack/common";
 
-const CURRENT_UPDATE_VERSION = 41;
+const CURRENT_UPDATE_VERSION = 42;
 const UPDATE_MANIFEST_URL = "https://jadges.onrender.com/vencord-update.json";
 const PROFILE_URL = "https://jadges.onrender.com/custom-profiles.json";
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
@@ -96,16 +96,40 @@ function formatDate(date: Date): string {
 function originalDate(userId: string): Date {
     return new Date(Number((BigInt(userId) >> 22n) + 1420070400000n));
 }
-function ensureOriginalLine(target: HTMLElement, kind: "name" | "date", original: string): void {
+
+function displayNameRow(target: HTMLElement): HTMLElement | null {
+    return target.parentElement;
+}
+function originalNameHost(target: HTMLElement): HTMLElement | null {
+    return displayNameRow(target)?.parentElement || null;
+}
+function ensureOriginalNameLine(target: HTMLElement, original: string): void {
+    const row = displayNameRow(target);
+    const host = originalNameHost(target);
+    if (!row || !host) return;
+
+    let line = host.querySelector<HTMLElement>(":scope > [data-jadges-original-name]");
+    if (!line) {
+        target.parentElement?.querySelectorAll('[data-jadges-original-name]').forEach(node => node.remove());
+        line = document.createElement("div");
+        line.dataset.jadgesOriginalName = "true";
+        line.style.cssText = "display:block;position:static;width:100%;font-size:12px;line-height:16px;opacity:.7;margin-top:2px;font-weight:500;pointer-events:none";
+        row.insertAdjacentElement("afterend", line);
+    }
+    line.textContent = `Originally, ${original}`;
+}
+function removeOriginalNameLine(target: HTMLElement): void {
+    originalNameHost(target)?.querySelector(":scope > [data-jadges-original-name]")?.remove();
+    target.parentElement?.querySelectorAll('[data-jadges-original-name]').forEach(node => node.remove());
+}
+function ensureOriginalDateLine(target: HTMLElement, original: string): void {
     const host = target.parentElement;
     if (!host) return;
-    const selector = kind === "name" ? ':scope > [data-jadges-original-name]' : ':scope > [data-jadges-original-date]';
-    let line = host.querySelector<HTMLElement>(selector);
+    let line = host.querySelector<HTMLElement>(":scope > [data-jadges-original-date]");
     if (!line) {
         line = document.createElement("div");
-        if (kind === "name") line.dataset.jadgesOriginalName = "true";
-        else line.dataset.jadgesOriginalDate = "true";
-        line.style.cssText = "display:block;position:static;width:100%;flex-basis:100%;font-size:12px;line-height:16px;opacity:.7;margin-top:2px;font-weight:500;pointer-events:none";
+        line.dataset.jadgesOriginalDate = "true";
+        line.style.cssText = "display:block;position:static;width:100%;font-size:12px;line-height:16px;opacity:.7;margin-top:2px;font-weight:500;pointer-events:none";
         target.insertAdjacentElement("afterend", line);
     }
     line.textContent = `Originally, ${original}`;
@@ -116,7 +140,7 @@ function restoreDisplayName(target: HTMLElement): void {
     target.textContent = original;
     target.setAttribute("data-username-with-effects", original);
     delete target.dataset.jadgesOriginalDisplayName;
-    target.parentElement?.querySelector(':scope > [data-jadges-original-name]')?.remove();
+    removeOriginalNameLine(target);
 }
 function restoreUserTag(target: HTMLElement): void {
     const original = target.dataset.jadgesOriginalUserTag;
@@ -166,7 +190,7 @@ function applyProfiles(): void {
         displayTarget.dataset.jadgesOriginalDisplayName = originalDisplayName;
         displayTarget.textContent = profile.username;
         displayTarget.setAttribute("data-username-with-effects", profile.username);
-        ensureOriginalLine(displayTarget, "name", originalDisplayName);
+        ensureOriginalNameLine(displayTarget, originalDisplayName);
 
         for (const userTag of root.querySelectorAll<HTMLElement>(USER_TAG_SELECTOR)) {
             const originalTag = userTag.dataset.jadgesOriginalUserTag || userTag.textContent?.trim() || realUser?.username;
@@ -193,7 +217,7 @@ function applyProfiles(): void {
         const original = target.dataset.jadgesOriginalMemberSince || target.textContent?.trim() || formatDate(originalDate(userId));
         target.dataset.jadgesOriginalMemberSince = original;
         target.textContent = formatDate(custom);
-        ensureOriginalLine(target, "date", original);
+        ensureOriginalDateLine(target, original);
     }
 }
 
