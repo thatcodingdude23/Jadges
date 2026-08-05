@@ -1,0 +1,188 @@
+name: Final clean Custom Profile source
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Write clean dashboard sources
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          website = Path('src/website.ts')
+          text = website.read_text()
+
+          appearance = '''        <a class="nav-link" href="#appearance"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-1 1.5-2-.7-1.5.4-3 2-3h2.2A3.3 3.3 0 0 0 21 12.7 9.7 9.7 0 0 0 12 3Z"/><path d="M7.5 10h.01M9 6.8h.01M14 6.5h.01M17 9h.01"/></svg>Appearance</a>'''
+          custom_link = appearance + '''\n        <a class="nav-link" href="#customprofile"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c.8-4.4 3.5-7 8-7s7.2 2.6 8 7"/><path d="M18 4v4M16 6h4"/></svg>Custom Profile</a>'''
+          dashboard_start = text.index('function dashboardPage')
+          dashboard_end = text.index('function errorPage', dashboard_start)
+          dashboard = text[dashboard_start:dashboard_end]
+          if 'href="#customprofile"' not in dashboard:
+              if appearance not in dashboard:
+                  raise SystemExit('Appearance link not found')
+              dashboard = dashboard.replace(appearance, custom_link, 1)
+
+          custom_section = '''
+
+        <section class="custom-profile-view" id="customprofile" hidden>
+          <div class="page-heading"><h1>Custom Profile</h1><p>Change your cosmetic username and account creation date without changing your real Discord account.</p></div>
+          <div class="custom-profile-grid">
+            <section class="panel custom-profile-editor">
+              <div class="panel-head"><div><h2>Profile details</h2><p>These values appear only to people using a supported Jadges client.</p></div><div class="save-indicator" id="custom-profile-status"><span class="save-dot"></span><span>Ready</span></div></div>
+              <form id="custom-profile-form" class="custom-profile-form">
+                <label><span>Custom username</span><input id="custom-profile-username" name="username" maxlength="32" placeholder="Enter a cosmetic name"><small>Used across profiles, messages, member lists, and supported Jadges surfaces.</small></label>
+                <label><span>Custom account creation date</span><input id="custom-profile-date" name="createdAt" type="date" min="1900-01-01"><small>Shown as your cosmetic Member Since date.</small></label>
+                <div class="custom-profile-note">Your original Discord username and real account creation date remain visible underneath.</div>
+                <div class="custom-profile-actions"><button class="primary-button" type="submit">Save changes</button><button class="secondary-button" id="custom-profile-clear" type="button">Clear custom profile</button></div>
+              </form>
+            </section>
+            <aside class="panel custom-profile-preview">
+              <div class="panel-head"><div><h2>Live preview</h2><p>Your cosmetic identity in a Discord-inspired card.</p></div></div>
+              <div class="custom-preview-body"><div class="custom-preview-card"><div class="custom-preview-banner"></div><div class="custom-preview-content"><img class="custom-preview-avatar" src="${safeAvatar}" alt=""><div class="custom-preview-name" id="custom-preview-name">${safeDisplayName}</div><div class="custom-preview-original">Originally, ${safeUsername}</div><div class="profile-divider"></div><div class="profile-section-title">Member Since</div><div class="custom-preview-date" id="custom-preview-date">Original Discord date</div><div class="custom-preview-original">Originally, your real account creation date</div></div></div></div>
+            </aside>
+          </div>
+        </section>'''
+
+          if 'id="customprofile"' not in dashboard:
+              marker = '''        </div>
+      </div>
+    </main>'''
+              if marker not in dashboard:
+                  raise SystemExit('Dashboard closing marker not found')
+              dashboard = dashboard.replace(marker, '''        </div>''' + custom_section + '''
+      </div>
+    </main>''', 1)
+
+          text = text[:dashboard_start] + dashboard + text[dashboard_end:]
+          website.write_text(text)
+
+          js = Path('web/jadges.js')
+          js_text = js.read_text()
+          if 'function setupCustomProfileTab()' not in js_text:
+              insert = r'''
+
+  function setupCustomProfileTab() {
+    const dashboardWrap = document.querySelector('.dashboard-wrap');
+    const customView = document.getElementById('customprofile');
+    const navLinks = [...document.querySelectorAll('.sidebar-nav .nav-link')];
+    const form = document.getElementById('custom-profile-form');
+    if (!dashboardWrap || !customView || !form) return;
+
+    const normalChildren = [...dashboardWrap.children].filter((child) => child !== customView);
+    const usernameInput = document.getElementById('custom-profile-username');
+    const dateInput = document.getElementById('custom-profile-date');
+    const previewName = document.getElementById('custom-preview-name');
+    const previewDate = document.getElementById('custom-preview-date');
+    const status = document.getElementById('custom-profile-status');
+    const userId = state.profile?.id;
+
+    const setStatus = (text, error = false) => {
+      if (!status) return;
+      status.classList.toggle('error', error);
+      const label = status.querySelector('span:last-child');
+      if (label) label.textContent = text;
+    };
+
+    const updatePreview = () => {
+      if (previewName) previewName.textContent = usernameInput?.value.trim() || state.profile.displayName;
+      if (previewDate) previewDate.textContent = dateInput?.value || 'Original Discord date';
+    };
+
+    const showRoute = () => {
+      const custom = location.hash === '#customprofile';
+      for (const child of normalChildren) child.hidden = custom;
+      customView.hidden = !custom;
+      for (const link of navLinks) link.classList.toggle('active', link.getAttribute('href') === (custom ? '#customprofile' : location.hash || '#dashboard'));
+      if (custom) window.scrollTo({ top: 0, behavior: 'instant' });
+    };
+
+    fetch('/custom-profiles.json', { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : {})
+      .then((profiles) => {
+        const profile = userId ? profiles[userId] || {} : {};
+        if (usernameInput) usernameInput.value = profile.username || '';
+        if (dateInput) dateInput.value = profile.createdAt ? String(profile.createdAt).slice(0, 10) : '';
+        updatePreview();
+      })
+      .catch(() => setStatus('Could not load profile', true));
+
+    usernameInput?.addEventListener('input', updatePreview);
+    dateInput?.addEventListener('input', updatePreview);
+    window.addEventListener('hashchange', showRoute);
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      setStatus('Saving…');
+      const response = await fetch('/api/custom-profile', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ username: usernameInput?.value || '', createdAt: dateInput?.value || '' }),
+      });
+      const body = await response.json().catch(() => ({}));
+      setStatus(response.ok ? 'Saved' : body.error || 'Could not save', !response.ok);
+    });
+
+    document.getElementById('custom-profile-clear')?.addEventListener('click', async () => {
+      if (usernameInput) usernameInput.value = '';
+      if (dateInput) dateInput.value = '';
+      updatePreview();
+      setStatus('Clearing…');
+      const response = await fetch('/api/custom-profile', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ username: '', createdAt: '' }),
+      });
+      setStatus(response.ok ? 'Cleared' : 'Could not clear', !response.ok);
+    });
+
+    showRoute();
+  }
+'''
+              js_text = js_text.replace('\n  render();\n})();', insert + '\n  setupCustomProfileTab();\n  render();\n})();')
+              js.write_text(js_text)
+
+          css = Path('web/jadges.css')
+          css_text = css.read_text()
+          if '.custom-profile-grid' not in css_text:
+              css_text += r'''
+
+.custom-profile-view[hidden]{display:none}.custom-profile-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);gap:24px;align-items:start}.custom-profile-editor{padding:0}.custom-profile-form{padding:0 24px 26px;display:grid;gap:18px}.custom-profile-form label>span{display:block;margin-bottom:8px;font-weight:800}.custom-profile-form input{width:100%;height:48px;padding:0 14px;border:1px solid #303b52;border-radius:11px;background:#080e19;color:#fff;font:inherit;outline:none}.custom-profile-form input:focus{border-color:#7c5cff;box-shadow:0 0 0 3px rgba(124,92,255,.15)}.custom-profile-form small{display:block;margin-top:7px;color:#7f8ba0}.custom-profile-note{padding:14px 15px;border:1px solid #2a3550;border-radius:12px;background:#0a1221;color:#aeb8ca}.custom-profile-actions{display:flex;gap:12px;flex-wrap:wrap}.custom-profile-actions .primary-button,.custom-profile-actions .secondary-button{margin:0;border-radius:11px;padding:12px 18px;font:inherit;font-weight:850;cursor:pointer}.custom-profile-actions .secondary-button{border:1px solid #303b52;background:transparent;color:#cbd2df}.custom-profile-preview{overflow:hidden}.custom-preview-body{padding:26px}.custom-preview-card{overflow:hidden;border:1px solid #30333b;border-radius:16px;background:#16181d}.custom-preview-banner{height:100px;background:radial-gradient(circle at 18% 30%,rgba(154,119,255,.8),transparent 30%),linear-gradient(135deg,#322367,#19274f)}.custom-preview-content{padding:0 18px 22px}.custom-preview-avatar{display:block;width:78px;height:78px;margin-top:-39px;border:6px solid #16181d;border-radius:50%;object-fit:cover;background:#222}.custom-preview-name{margin-top:11px;font-size:22px;font-weight:900}.custom-preview-original{margin-top:3px;color:#929aa8;font-size:12px}.custom-preview-date{margin-top:5px;color:#e5e7eb}@media(max-width:900px){.custom-profile-grid{grid-template-columns:1fr}}
+'''
+              css.write_text(css_text)
+
+          Path('src/vencordUpdateDashboardIntegration.ts').write_text('''import http, { type RequestListener, type ServerResponse } from "node:http";\n\nconst UPDATE_VERSION = 47;\nlet installed = false;\n\nfunction sendManifest(response: ServerResponse): void {\n  const body = JSON.stringify({ version: UPDATE_VERSION });\n  response.writeHead(200, {\n    "content-type": "application/json; charset=utf-8",\n    "content-length": String(Buffer.byteLength(body)),\n    "cache-control": "no-store, no-cache, must-revalidate",\n    "access-control-allow-origin": "*",\n  });\n  response.end(body);\n}\n\nfunction wrap(listener: RequestListener): RequestListener {\n  return (request, response) => {\n    const url = new URL(request.url || "/", "https://jadges.onrender.com");\n    if (request.method === "GET" && url.pathname === "/vencord-update.json") {\n      sendManifest(response);\n      return;\n    }\n    listener(request, response);\n  };\n}\n\nexport function installVencordUpdateDashboardIntegration(): void {\n  if (installed) return;\n  installed = true;\n  const mutable = http as typeof http & { createServer: (...args: any[]) => http.Server };\n  const original = mutable.createServer.bind(http) as (...args: any[]) => http.Server;\n  mutable.createServer = ((...args: any[]): http.Server => {\n    const index = typeof args[0] === "function" ? 0 : typeof args[1] === "function" ? 1 : -1;\n    if (index !== -1) args[index] = wrap(args[index] as RequestListener);\n    return original(...args);\n  }) as typeof http.createServer;\n}\n''')
+
+          for trigger in Path('.').glob('__trigger*'):
+              trigger.unlink()
+          for workflow in [
+              '.github/workflows/apply-custom-profile-dashboard.yml',
+              '.github/workflows/clean-dashboard-custom-profile.yml',
+              '.github/workflows/publish-jadges-update.yml',
+          ]:
+              Path(workflow).unlink(missing_ok=True)
+          PY
+
+      - name: Commit generated source changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Build Custom Profile into dashboard source"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
