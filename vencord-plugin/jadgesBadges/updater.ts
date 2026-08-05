@@ -1,7 +1,7 @@
 import { PluginNative } from "@utils/types";
 import { UserStore } from "@webpack/common";
 
-const CURRENT_UPDATE_VERSION = 36;
+const CURRENT_UPDATE_VERSION = 37;
 const UPDATE_MANIFEST_URL = "https://jadges.onrender.com/vencord-update.json";
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
 const PROFILE_URL = "https://jadges.onrender.com/custom-profiles.json";
@@ -17,12 +17,10 @@ type CustomProfiles = Record<string, CustomProfile>;
 let updateTimer: ReturnType<typeof setInterval> | undefined;
 let initialUpdateTimer: ReturnType<typeof setTimeout> | undefined;
 let profileTimer: ReturnType<typeof setInterval> | undefined;
-let profileObserver: MutationObserver | undefined;
 let profiles: CustomProfiles = {};
-let profileSignature = "";
-let applyingProfiles = false;
 let installing = false;
 let shownVersion = 0;
+let refreshingProfiles = false;
 
 function removeToast(): void { document.getElementById(TOAST_ID)?.remove(); }
 function text<K extends keyof HTMLElementTagNameMap>(tag: K, className: string, value: string): HTMLElementTagNameMap[K] {
@@ -70,86 +68,89 @@ function formatDate(date: Date): string {
 function originalDate(userId: string): Date {
     return new Date(Number((BigInt(userId) >> 22n) + 1420070400000n));
 }
-function restoreProfileVisuals(): void {
-    applyingProfiles = true;
-    try {
-        for (const element of document.querySelectorAll<HTMLElement>("[data-jadges-original-username-value]")) {
-            element.textContent = element.dataset.jadgesOriginalUsernameValue || element.textContent;
-            delete element.dataset.jadgesOriginalUsernameValue;
-        }
-        document.querySelectorAll('[data-jadges-original-username="true"],[data-jadges-created-at="true"]').forEach(node => node.remove());
-    } finally { applyingProfiles = false; }
+function restoreMissingProfiles(): void {
+    for (const element of document.querySelectorAll<HTMLElement>("[data-jadges-original-username-value]")) {
+        const root = element.closest<HTMLElement>('[class*="userProfile"],[class*="profilePopout"],[class*="profileModal"],[role="dialog"] [class*="profile"],[class*="biteSize"],[class*="fullSize"]');
+        const userId = root ? profileUserId(root) : undefined;
+        if (userId && profiles[userId]?.username) continue;
+        element.textContent = element.dataset.jadgesOriginalUsernameValue || element.textContent;
+        delete element.dataset.jadgesOriginalUsernameValue;
+        element.parentElement?.querySelector('[data-jadges-original-username="true"]')?.remove();
+    }
+    for (const section of document.querySelectorAll<HTMLElement>('[data-jadges-created-at="true"]')) {
+        const root = section.parentElement;
+        const userId = root ? profileUserId(root) : undefined;
+        if (!userId || !profiles[userId]?.createdAt) section.remove();
+    }
 }
 function applyProfiles(): void {
-    if (applyingProfiles) return;
-    applyingProfiles = true;
-    try {
-        restoreProfileVisuals();
-        let applied = 0;
-        for (const root of profileRoots()) {
-            const userId = profileUserId(root);
-            const profile = userId ? profiles[userId] : undefined;
-            if (!userId || !profile) continue;
-            const user = UserStore.getUser(userId);
-            if (profile.username && user) {
-                const originals = new Set([user.username, user.globalName].filter((value): value is string => Boolean(value)));
-                for (const element of root.querySelectorAll<HTMLElement>("h1,h2,h3,span,div")) {
-                    const value = element.children.length === 0 ? element.textContent?.trim() : undefined;
-                    if (!value || !originals.has(value)) continue;
-                    element.dataset.jadgesOriginalUsernameValue = value;
-                    element.textContent = profile.username;
-                    const line = document.createElement("div");
+    restoreMissingProfiles();
+    for (const root of profileRoots()) {
+        const userId = profileUserId(root);
+        const profile = userId ? profiles[userId] : undefined;
+        if (!userId || !profile) continue;
+        const user = UserStore.getUser(userId);
+        if (profile.username && user) {
+            const originals = new Set([user.username, user.globalName].filter((value): value is string => Boolean(value)));
+            for (const element of root.querySelectorAll<HTMLElement>("h1,h2,h3,span,div")) {
+                if (element.children.length !== 0) continue;
+                const current = element.textContent?.trim();
+                const original = element.dataset.jadgesOriginalUsernameValue || current;
+                if (!original || (!originals.has(original) && !element.dataset.jadgesOriginalUsernameValue)) continue;
+                element.dataset.jadgesOriginalUsernameValue = original;
+                if (element.textContent !== profile.username) element.textContent = profile.username;
+                let line = element.parentElement?.querySelector<HTMLElement>('[data-jadges-original-username="true"]');
+                if (!line && element.parentElement) {
+                    line = document.createElement("div");
                     line.dataset.jadgesOriginalUsername = "true";
-                    line.textContent = `Originally, ${value}`;
                     line.style.cssText = "font-size:12px;opacity:.7;margin-top:2px;font-weight:500";
-                    element.parentElement?.append(line);
-                    break;
+                    element.parentElement.append(line);
                 }
+                if (line) line.textContent = `Originally, ${original}`;
+                break;
             }
-            if (profile.createdAt) {
-                const custom = new Date(profile.createdAt);
-                if (!Number.isNaN(custom.getTime())) {
-                    const section = document.createElement("section");
+        }
+        if (profile.createdAt) {
+            const custom = new Date(profile.createdAt);
+            if (!Number.isNaN(custom.getTime())) {
+                let section = root.querySelector<HTMLElement>('[data-jadges-created-at="true"]');
+                if (!section) {
+                    section = document.createElement("section");
                     section.dataset.jadgesCreatedAt = "true";
                     section.style.cssText = "margin-top:12px;padding-top:12px;border-top:1px solid var(--background-modifier-accent,rgba(255,255,255,.08))";
-                    const label = text("div", "", "Account Created"); label.style.cssText = "font-size:12px;font-weight:700;opacity:.75;text-transform:uppercase;margin-bottom:4px";
-                    const value = text("div", "", formatDate(custom)); value.style.cssText = "font-size:14px;font-weight:600";
-                    const original = text("div", "", `Originally, ${formatDate(originalDate(userId))}`); original.style.cssText = "font-size:12px;opacity:.7;margin-top:2px";
-                    section.append(label, value, original); root.append(section);
+                    section.innerHTML = '<div data-jadges-date-label style="font-size:12px;font-weight:700;opacity:.75;text-transform:uppercase;margin-bottom:4px">Account Created</div><div data-jadges-custom-date style="font-size:14px;font-weight:600"></div><div data-jadges-original-date style="font-size:12px;opacity:.7;margin-top:2px"></div>';
+                    root.append(section);
                 }
+                const customLine = section.querySelector<HTMLElement>('[data-jadges-custom-date]');
+                const originalLine = section.querySelector<HTMLElement>('[data-jadges-original-date]');
+                if (customLine) customLine.textContent = formatDate(custom);
+                if (originalLine) originalLine.textContent = `Originally, ${formatDate(originalDate(userId))}`;
             }
-            applied++;
         }
-        if (applied) console.info(`[JadgesBadges] Applied custom profile to ${applied} view(s)`);
-    } finally { applyingProfiles = false; }
+    }
 }
 async function refreshProfiles(): Promise<void> {
+    if (refreshingProfiles) return;
+    refreshingProfiles = true;
     try {
         const response = await fetch(`${PROFILE_URL}?t=${Date.now()}`, { cache: "no-store", credentials: "omit" });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data = await response.json() as CustomProfiles;
-        const signature = JSON.stringify(data);
-        if (signature !== profileSignature) {
-            profileSignature = signature;
-            profiles = data;
-            console.info(`[JadgesBadges] Loaded ${Object.keys(profiles).length} custom profile(s)`);
-            applyProfiles();
-        }
+        profiles = data && typeof data === "object" && !Array.isArray(data) ? data : {};
+        applyProfiles();
     } catch (error) { console.warn("[JadgesBadges] Custom profile fetch failed:", error); }
+    finally { refreshingProfiles = false; }
 }
-function startProfileFallback(): void {
+function startProfileSync(): void {
     void refreshProfiles();
     clearInterval(profileTimer);
     profileTimer = setInterval(() => void refreshProfiles(), PROFILE_REFRESH_INTERVAL);
-    profileObserver?.disconnect();
-    profileObserver = new MutationObserver(() => { if (!applyingProfiles) queueMicrotask(applyProfiles); });
-    profileObserver.observe(document.body, { childList: true, subtree: true });
 }
-function stopProfileFallback(): void {
+function stopProfileSync(): void {
     clearInterval(profileTimer); profileTimer = undefined;
-    profileObserver?.disconnect(); profileObserver = undefined;
-    profiles = {}; profileSignature = "";
-    restoreProfileVisuals();
+    profiles = {};
+    restoreMissingProfiles();
+    document.querySelectorAll('[data-jadges-created-at="true"]').forEach(node => node.remove());
 }
 
 async function checkForUpdates(): Promise<void> {
@@ -164,7 +165,7 @@ async function checkForUpdates(): Promise<void> {
 }
 export function startUpdateChecker(): void {
     if (IS_WEB) return;
-    startProfileFallback();
+    startProfileSync();
     clearTimeout(initialUpdateTimer); clearInterval(updateTimer);
     initialUpdateTimer = setTimeout(() => void checkForUpdates(), 5_000);
     updateTimer = setInterval(() => void checkForUpdates(), UPDATE_CHECK_INTERVAL);
@@ -172,5 +173,5 @@ export function startUpdateChecker(): void {
 export function stopUpdateChecker(): void {
     clearTimeout(initialUpdateTimer); clearInterval(updateTimer);
     initialUpdateTimer = undefined; updateTimer = undefined; installing = false;
-    stopProfileFallback(); removeToast();
+    stopProfileSync(); removeToast();
 }
