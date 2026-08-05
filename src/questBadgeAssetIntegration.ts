@@ -1,22 +1,20 @@
 import http, { type RequestListener } from "node:http";
-import { COMPLETED_QUEST_BADGE_PNG_BASE64 } from "./questCompletionAsset.js";
 
 const QUEST_BADGE_PATH = "/badges/10000000-0000-4000-8000-000000000099.png";
-const QUEST_BADGE_BYTES = Buffer.from(COMPLETED_QUEST_BADGE_PNG_BASE64, "base64");
+const QUEST_BADGE_URL = "https://cdn3.emoji.gg/emojis/66366-completed-a-quest.png";
 let installed = false;
 
 function wrap(listener: RequestListener): RequestListener {
   return (request, response) => {
     const url = new URL(request.url || "/", "https://jadges.local");
     if (request.method === "GET" && url.pathname === QUEST_BADGE_PATH) {
-      response.writeHead(200, {
-        "content-type": "image/png",
-        "content-length": String(QUEST_BADGE_BYTES.length),
-        "cache-control": "public, max-age=86400, immutable",
+      response.writeHead(302, {
+        location: QUEST_BADGE_URL,
+        "cache-control": "public, max-age=86400",
         "access-control-allow-origin": "*",
         "x-content-type-options": "nosniff",
       });
-      response.end(QUEST_BADGE_BYTES);
+      response.end();
       return;
     }
 
