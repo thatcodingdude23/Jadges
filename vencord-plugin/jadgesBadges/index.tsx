@@ -7,7 +7,6 @@
 import definePlugin from "@utils/types";
 
 import basePlugin from "./base";
-import { startCustomProfileSync, stopCustomProfileSync } from "./customProfileSync";
 import {
     startNativeInventorySync,
     stopNativeInventorySync
@@ -212,7 +211,6 @@ async function startWithoutGlobalBadgeClick(): Promise<void> {
         startVisibilitySync();
         startProfileVisibilityReporter();
         startNativeInventorySync();
-        startCustomProfileSync();
     } finally {
         document.addEventListener = originalAdd;
     }
@@ -220,14 +218,13 @@ async function startWithoutGlobalBadgeClick(): Promise<void> {
 
 export default definePlugin({
     name: "JadgesBadges",
-    description: "Displays Jadges badges, cosmetic custom profiles, native badge ordering, themes, and verified updates.",
+    description: "Displays Jadges badges, native badge ordering, themes, and verified updates.",
     authors: [{ name: "Jaycord", id: 0n }],
     dependencies: ["BadgeAPI"],
     options: (basePlugin as any).options,
     start: startWithoutGlobalBadgeClick,
     stop() {
         try {
-            stopCustomProfileSync();
             stopNativeInventorySync();
             stopProfileVisibilityReporter();
             stopVisibilitySync();

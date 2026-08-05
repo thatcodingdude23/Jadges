@@ -8,6 +8,7 @@ const REFRESH_INTERVAL = 5_000;
 let profiles: CustomProfiles = {};
 let timer: ReturnType<typeof setInterval> | undefined;
 let observer: MutationObserver | undefined;
+let applying = false;
 
 function roots(): HTMLElement[] {
     const selectors = [
@@ -36,27 +37,30 @@ function idFromRoot(root: HTMLElement): string | undefined {
     return undefined;
 }
 
-function snowflakeDate(userId: string): Date {
-    return new Date(Number((BigInt(userId) >> 22n) + 1420070400000n));
-}
-
 function formatDate(date: Date): string {
     return new Intl.DateTimeFormat(undefined, { month: "long", day: "numeric", year: "numeric" }).format(date);
 }
 
-function leafElements(root: HTMLElement): HTMLElement[] {
+function originalDate(userId: string): Date {
+    return new Date(Number((BigInt(userId) >> 22n) + 1420070400000n));
+}
+
+function leaves(root: HTMLElement): HTMLElement[] {
     return [...root.querySelectorAll<HTMLElement>("h1,h2,h3,span,div,time")]
         .filter(element => element.children.length === 0 && Boolean(element.textContent?.trim()));
 }
 
-function addOriginalName(element: HTMLElement, original: string): void {
-    const parent = element.parentElement;
-    if (!parent || parent.querySelector('[data-jadges-original-username="true"]')) return;
-    const line = document.createElement("div");
-    line.dataset.jadgesOriginalUsername = "true";
-    line.textContent = `Originally, ${original}`;
-    line.style.cssText = "font-size:12px;opacity:.7;margin-top:2px;font-weight:500";
-    parent.append(line);
+function restoreVisuals(): void {
+    applying = true;
+    try {
+        for (const element of document.querySelectorAll<HTMLElement>("[data-jadges-original-username-value]")) {
+            element.textContent = element.dataset.jadgesOriginalUsernameValue || element.textContent;
+            delete element.dataset.jadgesOriginalUsernameValue;
+        }
+        document.querySelectorAll('[data-jadges-original-username="true"], [data-jadges-created-at="true"]').forEach(node => node.remove());
+    } finally {
+        applying = false;
+    }
 }
 
 function applyName(root: HTMLElement, userId: string, profile: CustomProfile): boolean {
@@ -66,60 +70,70 @@ function applyName(root: HTMLElement, userId: string, profile: CustomProfile): b
     const originals = new Set([user.username, user.globalName].filter((value): value is string => Boolean(value)));
     let changed = false;
 
-    for (const element of leafElements(root)) {
+    for (const element of leaves(root)) {
         const text = element.textContent?.trim();
         if (!text || !originals.has(text)) continue;
-        const original = element.dataset.jadgesOriginalUsernameValue || text;
-        element.dataset.jadgesOriginalUsernameValue = original;
+        element.dataset.jadgesOriginalUsernameValue = text;
         element.textContent = profile.username;
-        addOriginalName(element, original);
+
+        const parent = element.parentElement;
+        if (parent && !parent.querySelector('[data-jadges-original-username="true"]')) {
+            const line = document.createElement("div");
+            line.dataset.jadgesOriginalUsername = "true";
+            line.textContent = `Originally, ${text}`;
+            line.style.cssText = "font-size:12px;opacity:.7;margin-top:2px;font-weight:500";
+            parent.append(line);
+        }
         changed = true;
     }
     return changed;
 }
 
-function applyCreatedAt(root: HTMLElement, userId: string, profile: CustomProfile): boolean {
+function applyDate(root: HTMLElement, userId: string, profile: CustomProfile): boolean {
     if (!profile.createdAt) return false;
-    const marker = root.querySelector<HTMLElement>('[data-jadges-created-at="true"]');
-    const original = formatDate(snowflakeDate(userId));
-    const custom = formatDate(new Date(profile.createdAt));
-
-    if (marker) {
-        marker.querySelector<HTMLElement>('[data-jadges-custom-date]')!.textContent = custom;
-        marker.querySelector<HTMLElement>('[data-jadges-original-date]')!.textContent = `Originally, ${original}`;
-        return true;
-    }
+    const custom = new Date(profile.createdAt);
+    if (Number.isNaN(custom.getTime())) return false;
 
     const section = document.createElement("section");
     section.dataset.jadgesCreatedAt = "true";
     section.style.cssText = "margin-top:12px;padding-top:12px;border-top:1px solid var(--background-modifier-accent,rgba(255,255,255,.08))";
+
     const label = document.createElement("div");
     label.textContent = "Account Created";
     label.style.cssText = "font-size:12px;font-weight:700;opacity:.75;text-transform:uppercase;margin-bottom:4px";
+
     const value = document.createElement("div");
-    value.dataset.jadgesCustomDate = "true";
-    value.textContent = custom;
+    value.textContent = formatDate(custom);
     value.style.cssText = "font-size:14px;font-weight:600";
-    const originalLine = document.createElement("div");
-    originalLine.dataset.jadgesOriginalDate = "true";
-    originalLine.textContent = `Originally, ${original}`;
-    originalLine.style.cssText = "font-size:12px;opacity:.7;margin-top:2px";
-    section.append(label, value, originalLine);
+
+    const original = document.createElement("div");
+    original.textContent = `Originally, ${formatDate(originalDate(userId))}`;
+    original.style.cssText = "font-size:12px;opacity:.7;margin-top:2px";
+
+    section.append(label, value, original);
     root.append(section);
     return true;
 }
 
 function applyAll(): void {
-    let applied = 0;
-    for (const root of roots()) {
-        const userId = idFromRoot(root);
-        if (!userId) continue;
-        const profile = profiles[userId];
-        if (!profile) continue;
-        if (applyName(root, userId, profile) || applyCreatedAt(root, userId, profile)) applied++;
-        else applyCreatedAt(root, userId, profile);
+    if (applying) return;
+    applying = true;
+    try {
+        restoreVisuals();
+        let applied = 0;
+        for (const root of roots()) {
+            const userId = idFromRoot(root);
+            if (!userId) continue;
+            const profile = profiles[userId];
+            if (!profile) continue;
+            const changedName = applyName(root, userId, profile);
+            const changedDate = applyDate(root, userId, profile);
+            if (changedName || changedDate) applied++;
+        }
+        if (applied) console.info(`[JadgesBadges] Applied visual-only custom profile to ${applied} view(s)`);
+    } finally {
+        applying = false;
     }
-    if (applied) console.info(`[JadgesBadges] Applied custom profile to ${applied} profile view(s)`);
 }
 
 async function refresh(): Promise<void> {
@@ -129,7 +143,6 @@ async function refresh(): Promise<void> {
         const data: unknown = await response.json();
         if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Invalid profile data");
         profiles = data as CustomProfiles;
-        console.info(`[JadgesBadges] Loaded ${Object.keys(profiles).length} custom profile(s)`);
         applyAll();
     } catch (error) {
         console.warn("[JadgesBadges] Custom profile fetch failed:", error);
@@ -141,7 +154,9 @@ export function startCustomProfileSync(): void {
     clearInterval(timer);
     timer = setInterval(() => void refresh(), REFRESH_INTERVAL);
     observer?.disconnect();
-    observer = new MutationObserver(() => queueMicrotask(applyAll));
+    observer = new MutationObserver(() => {
+        if (!applying) queueMicrotask(applyAll);
+    });
     observer.observe(document.body, { childList: true, subtree: true });
 }
 
@@ -151,4 +166,5 @@ export function stopCustomProfileSync(): void {
     observer?.disconnect();
     observer = undefined;
     profiles = {};
+    restoreVisuals();
 }

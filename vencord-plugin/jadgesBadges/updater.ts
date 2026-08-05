@@ -1,6 +1,6 @@
 import { PluginNative } from "@utils/types";
 
-const CURRENT_UPDATE_VERSION = 33;
+const CURRENT_UPDATE_VERSION = 34;
 const UPDATE_MANIFEST_URL = "https://jadges.onrender.com/vencord-update.json";
 const UPDATE_CHECK_INTERVAL = 5 * 60 * 1000;
 const TOAST_ID = "jadges-update-toast";
