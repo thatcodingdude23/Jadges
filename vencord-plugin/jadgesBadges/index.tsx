@@ -25,6 +25,14 @@ const CUSTOM_PROFILE_URL = "https://jadges.onrender.com/custom-profiles.json";
 const DISPLAY_NAME_SELECTOR = 'span[data-username-with-effects]';
 const USER_TAG_SELECTOR = 'span[class*="userTagUsername_"]';
 const PANEL_USERNAME_SELECTOR = '[class*="panelSubtextContainer_"] [class*="hovered_"]';
+const SURFACE_NAME_SELECTOR = [
+    '[class*="messageListItem_"] [class*="username_"]',
+    '[class*="message_"] [class*="username_"]',
+    '[class*="members_"] [class*="username_"]',
+    '[class*="member_"] [class*="username_"]',
+    '[class*="privateChannels_"] [class*="name_"]',
+    '[class*="channel_"] [class*="name_"]'
+].join(",");
 
 type FetchFunction = typeof globalThis.fetch;
 type QuerySelectorAll = typeof document.querySelectorAll;
@@ -201,6 +209,11 @@ function matchingProfileId(originalName: string, profiles: CustomProfiles): stri
     });
 }
 
+function customNameFor(originalName: string, profiles: CustomProfiles): string | undefined {
+    const userId = matchingProfileId(originalName, profiles);
+    return userId ? profiles[userId]?.username?.trim() : undefined;
+}
+
 async function syncAllUsernameEffects(): Promise<void> {
     if (syncingGlobalNames) return;
     syncingGlobalNames = true;
@@ -220,8 +233,7 @@ async function syncAllUsernameEffects(): Promise<void> {
                 || span.textContent?.trim();
             if (!original) continue;
 
-            const userId = matchingProfileId(original, profiles);
-            const customName = userId ? profiles[userId]?.username?.trim() : undefined;
+            const customName = customNameFor(original, profiles);
             if (!customName) continue;
 
             if (!span.dataset.jadgesOriginalDisplayName && !span.dataset.jadgesGlobalOriginalName) {
@@ -244,13 +256,23 @@ async function syncAllUsernameEffects(): Promise<void> {
         for (const panelName of document.querySelectorAll<HTMLElement>(PANEL_USERNAME_SELECTOR)) {
             const original = panelName.dataset.jadgesPanelOriginalName || panelName.textContent?.trim();
             if (!original) continue;
-            const userId = matchingProfileId(original, profiles);
-            const customName = userId ? profiles[userId]?.username?.trim() : undefined;
+            const customName = customNameFor(original, profiles);
             if (!customName) continue;
             if (!panelName.dataset.jadgesPanelOriginalName) {
                 panelName.dataset.jadgesPanelOriginalName = original;
             }
             panelName.textContent = customName;
+        }
+
+        for (const nameElement of document.querySelectorAll<HTMLElement>(SURFACE_NAME_SELECTOR)) {
+            const original = nameElement.dataset.jadgesSurfaceOriginalName || nameElement.textContent?.trim();
+            if (!original) continue;
+            const customName = customNameFor(original, profiles);
+            if (!customName) continue;
+            if (!nameElement.dataset.jadgesSurfaceOriginalName) {
+                nameElement.dataset.jadgesSurfaceOriginalName = original;
+            }
+            nameElement.textContent = customName;
         }
     } catch (error) {
         console.warn("[JadgesBadges] Global custom-name sync failed:", error);
@@ -280,6 +302,12 @@ function stopGlobalCustomNameSync(): void {
         if (!original) continue;
         panelName.textContent = original;
         delete panelName.dataset.jadgesPanelOriginalName;
+    }
+    for (const nameElement of document.querySelectorAll<HTMLElement>(SURFACE_NAME_SELECTOR)) {
+        const original = nameElement.dataset.jadgesSurfaceOriginalName;
+        if (!original) continue;
+        nameElement.textContent = original;
+        delete nameElement.dataset.jadgesSurfaceOriginalName;
     }
 }
 
