@@ -4,11 +4,12 @@ interface CustomProfile { username?: string; createdAt?: string; }
 type CustomProfiles = Record<string, CustomProfile>;
 
 const API_URL = "https://jadges.onrender.com/custom-profiles.json";
-const REFRESH_INTERVAL = 5_000;
+const REFRESH_INTERVAL = 750;
 let profiles: CustomProfiles = {};
 let timer: ReturnType<typeof setInterval> | undefined;
 let observer: MutationObserver | undefined;
 let applying = false;
+let lastPayload = "";
 
 function roots(): HTMLElement[] {
     const selectors = [
@@ -51,16 +52,11 @@ function leaves(root: HTMLElement): HTMLElement[] {
 }
 
 function restoreVisuals(): void {
-    applying = true;
-    try {
-        for (const element of document.querySelectorAll<HTMLElement>("[data-jadges-original-username-value]")) {
-            element.textContent = element.dataset.jadgesOriginalUsernameValue || element.textContent;
-            delete element.dataset.jadgesOriginalUsernameValue;
-        }
-        document.querySelectorAll('[data-jadges-original-username="true"], [data-jadges-created-at="true"]').forEach(node => node.remove());
-    } finally {
-        applying = false;
+    for (const element of document.querySelectorAll<HTMLElement>("[data-jadges-original-username-value]")) {
+        element.textContent = element.dataset.jadgesOriginalUsernameValue || element.textContent;
+        delete element.dataset.jadgesOriginalUsernameValue;
     }
+    document.querySelectorAll('[data-jadges-original-username="true"], [data-jadges-created-at="true"]').forEach(node => node.remove());
 }
 
 function applyName(root: HTMLElement, userId: string, profile: CustomProfile): boolean {
@@ -97,19 +93,15 @@ function applyDate(root: HTMLElement, userId: string, profile: CustomProfile): b
     const section = document.createElement("section");
     section.dataset.jadgesCreatedAt = "true";
     section.style.cssText = "margin-top:12px;padding-top:12px;border-top:1px solid var(--background-modifier-accent,rgba(255,255,255,.08))";
-
     const label = document.createElement("div");
     label.textContent = "Account Created";
     label.style.cssText = "font-size:12px;font-weight:700;opacity:.75;text-transform:uppercase;margin-bottom:4px";
-
     const value = document.createElement("div");
     value.textContent = formatDate(custom);
     value.style.cssText = "font-size:14px;font-weight:600";
-
     const original = document.createElement("div");
     original.textContent = `Originally, ${formatDate(originalDate(userId))}`;
     original.style.cssText = "font-size:12px;opacity:.7;margin-top:2px";
-
     section.append(label, value, original);
     root.append(section);
     return true;
@@ -120,17 +112,14 @@ function applyAll(): void {
     applying = true;
     try {
         restoreVisuals();
-        let applied = 0;
         for (const root of roots()) {
             const userId = idFromRoot(root);
             if (!userId) continue;
             const profile = profiles[userId];
             if (!profile) continue;
-            const changedName = applyName(root, userId, profile);
-            const changedDate = applyDate(root, userId, profile);
-            if (changedName || changedDate) applied++;
+            applyName(root, userId, profile);
+            applyDate(root, userId, profile);
         }
-        if (applied) console.info(`[JadgesBadges] Applied visual-only custom profile to ${applied} view(s)`);
     } finally {
         applying = false;
     }
@@ -142,8 +131,12 @@ async function refresh(): Promise<void> {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const data: unknown = await response.json();
         if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Invalid profile data");
-        profiles = data as CustomProfiles;
-        applyAll();
+        const payload = JSON.stringify(data);
+        if (payload !== lastPayload) {
+            lastPayload = payload;
+            profiles = data as CustomProfiles;
+            applyAll();
+        }
     } catch (error) {
         console.warn("[JadgesBadges] Custom profile fetch failed:", error);
     }
@@ -166,5 +159,6 @@ export function stopCustomProfileSync(): void {
     observer?.disconnect();
     observer = undefined;
     profiles = {};
+    lastPayload = "";
     restoreVisuals();
 }
