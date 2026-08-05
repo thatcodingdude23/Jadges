@@ -26,7 +26,7 @@ jobs:
           import zipfile
           from pathlib import Path
 
-          version = 38
+          version = 39
           root = Path("vencord-plugin/jadgesBadges")
           names = [
               "index.tsx",
@@ -54,7 +54,7 @@ jobs:
               encoding="utf-8",
           )
 
-          output = Path("dist/jadgesBadges-v38.zip")
+          output = Path("dist/jadgesBadges-v39.zip")
           output.parent.mkdir(parents=True, exist_ok=True)
           with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
               for file in sorted(root.rglob("*")):
@@ -68,7 +68,7 @@ jobs:
                   "4. Extract the jadgesBadges folder from this ZIP into userplugins.\n"
                   "5. In the Vencord folder, run: pnpm build\n"
                   "6. Open Discord again.\n\n"
-                  "This package edits only Discord's existing profile name and Member Since text.\n",
+                  "This package targets data-username-with-effects and the native Member Since section exactly.\n",
               )
           PY
 
@@ -76,7 +76,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add vencord-plugin/update.json dist/jadgesBadges-v38.zip
+          git add vencord-plugin/update.json dist/jadgesBadges-v39.zip
           git diff --cached --quiet && exit 0
-          git commit -m "Publish Jadges Vencord v38 ZIP"
+          git commit -m "Publish Jadges Vencord v39 ZIP"
           git push
