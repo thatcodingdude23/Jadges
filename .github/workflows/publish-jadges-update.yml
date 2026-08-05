@@ -13,147 +13,29 @@ jobs:
   publish:
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Apply v46 message username fix and generate package
+      - uses: actions/checkout@v4
+      - name: Publish v46
         run: |
           python3 - <<'PY'
-          import hashlib
           import json
           import re
-          import zipfile
           from pathlib import Path
 
-          version = 46
-          index = Path("vencord-plugin/jadgesBadges/index.tsx")
-          text = index.read_text()
+          updater = Path('vencord-plugin/jadgesBadges/updater.ts')
+          updater.write_text(re.sub(r'const CURRENT_UPDATE_VERSION = \d+;', 'const CURRENT_UPDATE_VERSION = 46;', updater.read_text()))
 
-          if "MESSAGE_USERNAME_SELECTOR" not in text:
-              text = text.replace(
-                  "const PANEL_USERNAME_SELECTOR = '[class*=\"panelSubtextContainer_\"] [class*=\"hovered_\"]';",
-                  "const PANEL_USERNAME_SELECTOR = '[class*=\"panelSubtextContainer_\"] [class*=\"hovered_\"]';\nconst MESSAGE_USERNAME_SELECTOR = 'span[id^=\"message-username-\"] > span[class*=\"username_\"]';"
-              )
+          server = Path('src/vencordUpdateDashboardIntegration.ts')
+          server.write_text(re.sub(r'const UPDATE_VERSION = \d+;', 'const UPDATE_VERSION = 46;', server.read_text()))
 
-              helper_marker = '''function customNameFor(originalName: string, profiles: CustomProfiles): string | undefined {
-    const userId = matchingProfileId(originalName, profiles);
-    return userId ? profiles[userId]?.username?.trim() : undefined;
-}
-'''
-              helper_replacement = helper_marker + '''
-function firstDirectTextNode(element: HTMLElement): Text | undefined {
-    return [...element.childNodes].find((node): node is Text => node.nodeType === Node.TEXT_NODE);
-}
-'''
-              if helper_marker not in text:
-                  raise SystemExit("customNameFor helper not found")
-              text = text.replace(helper_marker, helper_replacement)
-
-              surface_marker = '''        for (const nameElement of document.querySelectorAll<HTMLElement>(SURFACE_NAME_SELECTOR)) {
-            const original = nameElement.dataset.jadgesSurfaceOriginalName || nameElement.textContent?.trim();
-            if (!original) continue;
-            const customName = customNameFor(original, profiles);
-            if (!customName) continue;
-            if (!nameElement.dataset.jadgesSurfaceOriginalName) {
-                nameElement.dataset.jadgesSurfaceOriginalName = original;
-            }
-            nameElement.textContent = customName;
-        }'''
-              message_block = '''        for (const messageName of document.querySelectorAll<HTMLElement>(MESSAGE_USERNAME_SELECTOR)) {
-            const textNode = firstDirectTextNode(messageName);
-            const originalDataText = messageName.dataset.jadgesMessageOriginalDataText
-                || messageName.getAttribute("data-text")
-                || undefined;
-            const originalText = messageName.dataset.jadgesMessageOriginalText
-                || textNode?.nodeValue?.trim()
-                || undefined;
-            const identity = originalDataText || originalText;
-            if (!identity || !textNode) continue;
-            const customName = customNameFor(identity, profiles);
-            if (!customName) continue;
-            if (!messageName.dataset.jadgesMessageOriginalText && originalText) {
-                messageName.dataset.jadgesMessageOriginalText = originalText;
-            }
-            if (!messageName.dataset.jadgesMessageOriginalDataText && originalDataText) {
-                messageName.dataset.jadgesMessageOriginalDataText = originalDataText;
-            }
-            textNode.nodeValue = `${customName} `;
-            messageName.setAttribute("data-text", customName);
-        }
-
-        for (const nameElement of document.querySelectorAll<HTMLElement>(SURFACE_NAME_SELECTOR)) {
-            if (nameElement.matches(MESSAGE_USERNAME_SELECTOR)) continue;
-            const original = nameElement.dataset.jadgesSurfaceOriginalName || nameElement.textContent?.trim();
-            if (!original) continue;
-            const customName = customNameFor(original, profiles);
-            if (!customName) continue;
-            if (!nameElement.dataset.jadgesSurfaceOriginalName) {
-                nameElement.dataset.jadgesSurfaceOriginalName = original;
-            }
-            nameElement.textContent = customName;
-        }'''
-              if surface_marker not in text:
-                  raise SystemExit("surface name sync block not found")
-              text = text.replace(surface_marker, message_block)
-
-              stop_marker = '''    for (const nameElement of document.querySelectorAll<HTMLElement>(SURFACE_NAME_SELECTOR)) {
-        const original = nameElement.dataset.jadgesSurfaceOriginalName;
-        if (!original) continue;
-        nameElement.textContent = original;
-        delete nameElement.dataset.jadgesSurfaceOriginalName;
-    }
-}'''
-              stop_replacement = '''    for (const messageName of document.querySelectorAll<HTMLElement>(MESSAGE_USERNAME_SELECTOR)) {
-        const textNode = firstDirectTextNode(messageName);
-        const originalText = messageName.dataset.jadgesMessageOriginalText;
-        const originalDataText = messageName.dataset.jadgesMessageOriginalDataText;
-        if (textNode && originalText) textNode.nodeValue = `${originalText} `;
-        if (originalDataText) messageName.setAttribute("data-text", originalDataText);
-        delete messageName.dataset.jadgesMessageOriginalText;
-        delete messageName.dataset.jadgesMessageOriginalDataText;
-    }
-    for (const nameElement of document.querySelectorAll<HTMLElement>(SURFACE_NAME_SELECTOR)) {
-        const original = nameElement.dataset.jadgesSurfaceOriginalName;
-        if (!original) continue;
-        nameElement.textContent = original;
-        delete nameElement.dataset.jadgesSurfaceOriginalName;
-    }
-}'''
-              if stop_marker not in text:
-                  raise SystemExit("surface restore block not found")
-              text = text.replace(stop_marker, stop_replacement)
-              index.write_text(text)
-
-          updater = Path("vencord-plugin/jadgesBadges/updater.ts")
-          updater.write_text(re.sub(r"const CURRENT_UPDATE_VERSION = \d+;", "const CURRENT_UPDATE_VERSION = 46;", updater.read_text()))
-
-          server = Path("src/vencordUpdateDashboardIntegration.ts")
-          server.write_text(re.sub(r"const UPDATE_VERSION = \d+;", "const UPDATE_VERSION = 46;", server.read_text()))
-
-          root = Path("vencord-plugin/jadgesBadges")
-          names = ["index.tsx", "base.tsx", "customProfileSync.ts", "native.ts", "style.css", "updater.ts", "updateNative.ts"]
-          manifest = {
-              "version": version,
-              "files": [{"path": name, "sha256": hashlib.sha256((root / name).read_bytes()).hexdigest()} for name in names],
-          }
-          Path("vencord-plugin/update.json").write_text(json.dumps(manifest, indent=2) + "\n")
-
-          output = Path("dist/jadgesBadges-v46.zip")
-          output.parent.mkdir(parents=True, exist_ok=True)
-          with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-              for file in sorted(root.rglob("*")):
-                  if file.is_file():
-                      archive.write(file, Path("jadgesBadges") / file.relative_to(root))
-              archive.writestr("INSTALL.txt", "Install the jadgesBadges folder, run pnpm build, then restart Discord.\n")
+          Path('vencord-plugin/update.json').write_text(json.dumps({'version': 46}, indent=2) + '\n')
+          Path('__trigger_v46').unlink(missing_ok=True)
           PY
-
-      - name: Commit generated v46 package
+      - name: Commit v46
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --quiet && exit 0
-          git commit -m "Publish Jadges Vencord v46 ZIP"
+          git commit -m "Publish Jadges Vencord v46"
           git push
