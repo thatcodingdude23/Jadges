@@ -24,6 +24,7 @@ const BADGE_QUERY = 'img[class*="badge"], img.jadges-profile-badge-image';
 const CUSTOM_PROFILE_URL = "https://jadges.onrender.com/custom-profiles.json";
 const DISPLAY_NAME_SELECTOR = 'span[data-username-with-effects]';
 const USER_TAG_SELECTOR = 'span[class*="userTagUsername_"]';
+const PANEL_USERNAME_SELECTOR = '[class*="panelSubtextContainer_"] [class*="hovered_"]';
 
 type FetchFunction = typeof globalThis.fetch;
 type QuerySelectorAll = typeof document.querySelectorAll;
@@ -230,13 +231,26 @@ async function syncAllUsernameEffects(): Promise<void> {
             span.setAttribute("data-username-with-effects", customName);
 
             const scope = span.closest<HTMLElement>('[class*="userProfile"],[class*="profilePopout"],[class*="profileModal"],[role="dialog"],[class*="biteSize"],[class*="fullSize"]');
-            if (!scope) continue;
-            for (const userTag of scope.querySelectorAll<HTMLElement>(USER_TAG_SELECTOR)) {
-                if (!userTag.dataset.jadgesOriginalUserTag) {
-                    userTag.dataset.jadgesOriginalUserTag = userTag.textContent?.trim() || original;
+            if (scope) {
+                for (const userTag of scope.querySelectorAll<HTMLElement>(USER_TAG_SELECTOR)) {
+                    if (!userTag.dataset.jadgesOriginalUserTag) {
+                        userTag.dataset.jadgesOriginalUserTag = userTag.textContent?.trim() || original;
+                    }
+                    userTag.textContent = customName;
                 }
-                userTag.textContent = customName;
             }
+        }
+
+        for (const panelName of document.querySelectorAll<HTMLElement>(PANEL_USERNAME_SELECTOR)) {
+            const original = panelName.dataset.jadgesPanelOriginalName || panelName.textContent?.trim();
+            if (!original) continue;
+            const userId = matchingProfileId(original, profiles);
+            const customName = userId ? profiles[userId]?.username?.trim() : undefined;
+            if (!customName) continue;
+            if (!panelName.dataset.jadgesPanelOriginalName) {
+                panelName.dataset.jadgesPanelOriginalName = original;
+            }
+            panelName.textContent = customName;
         }
     } catch (error) {
         console.warn("[JadgesBadges] Global custom-name sync failed:", error);
@@ -260,6 +274,12 @@ function stopGlobalCustomNameSync(): void {
         span.textContent = original;
         span.setAttribute("data-username-with-effects", original);
         delete span.dataset.jadgesGlobalOriginalName;
+    }
+    for (const panelName of document.querySelectorAll<HTMLElement>(PANEL_USERNAME_SELECTOR)) {
+        const original = panelName.dataset.jadgesPanelOriginalName;
+        if (!original) continue;
+        panelName.textContent = original;
+        delete panelName.dataset.jadgesPanelOriginalName;
     }
 }
 

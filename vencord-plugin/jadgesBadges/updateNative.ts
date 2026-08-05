@@ -531,11 +531,14 @@ function buildProcess(
             for (const line of text.split(/\r?\n/)) {
                 const clean = line.trimEnd();
                 if (!clean) continue;
+                const actualError = source === "error"
+                    && /(?:^|\b)(?:error|failed|failure|fatal|exception|enoent|eacces)(?:\b|:)/i.test(clean);
+                const label = actualError ? "error" : "build";
                 void updateInstaller(ui, {
                     percent: progress,
                     status: "Building Vencord…",
-                    log: `[${source}] ${clean}`,
-                    logType: source === "error" ? "error" : undefined
+                    log: `[${label}] ${clean}`,
+                    logType: actualError ? "error" : undefined
                 });
             }
         };
