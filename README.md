@@ -2,7 +2,7 @@
 
 Jadges is a custom Discord badge system that lets users submit profile badges, choose Nitro appearances, rearrange their Jadges badges, and display approved badges directly on Discord profiles.
 
-**Official Discord server:** https://discord.gg/jaycord
+**Official Discord server:** https://discord.gg/h63eG654F
 
 ## Supported clients
 
