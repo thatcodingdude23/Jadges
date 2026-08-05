@@ -5,6 +5,7 @@
  */
 
 import definePlugin from "@utils/types";
+import { UserStore } from "@webpack/common";
 
 import basePlugin from "./base";
 import {
@@ -20,6 +21,9 @@ import { startUpdateChecker, stopUpdateChecker } from "./updater";
 import { startVisibilitySync, stopVisibilitySync } from "./visibilitySync";
 
 const BADGE_QUERY = 'img[class*="badge"], img.jadges-profile-badge-image';
+const CUSTOM_PROFILE_URL = "https://jadges.onrender.com/custom-profiles.json";
+const DISPLAY_NAME_SELECTOR = 'span[data-username-with-effects]';
+const USER_TAG_SELECTOR = 'span[class*="userTagUsername_"]';
 
 type FetchFunction = typeof globalThis.fetch;
 type QuerySelectorAll = typeof document.querySelectorAll;
@@ -30,10 +34,19 @@ interface NativeReportDecision {
     init?: RequestInit;
 }
 
+interface CustomProfile {
+    username?: string;
+    createdAt?: string;
+}
+
+type CustomProfiles = Record<string, CustomProfile>;
+
 let originalFetch: FetchFunction | undefined;
 let originalQuerySelectorAll: QuerySelectorAll | undefined;
 let fetchInstalled = false;
 let queryFilterInstalled = false;
+let globalNameTimer: ReturnType<typeof setInterval> | undefined;
+let syncingGlobalNames = false;
 
 function requestUrl(input: RequestInfo | URL): string {
     if (typeof input === "string") return input;
@@ -180,6 +193,76 @@ function installBadgeQueryFilter(): void {
     }) as QuerySelectorAll;
 }
 
+function matchingProfileId(originalName: string, profiles: CustomProfiles): string | undefined {
+    return Object.keys(profiles).find(userId => {
+        const user = UserStore.getUser(userId);
+        return user?.username === originalName || user?.globalName === originalName;
+    });
+}
+
+async function syncAllUsernameEffects(): Promise<void> {
+    if (syncingGlobalNames) return;
+    syncingGlobalNames = true;
+    try {
+        const response = await fetch(`${CUSTOM_PROFILE_URL}?t=${Date.now()}`, {
+            cache: "no-store",
+            credentials: "omit"
+        });
+        if (!response.ok) return;
+        const profiles = await response.json() as CustomProfiles;
+        if (!profiles || typeof profiles !== "object" || Array.isArray(profiles)) return;
+
+        for (const span of document.querySelectorAll<HTMLElement>(DISPLAY_NAME_SELECTOR)) {
+            const original = span.dataset.jadgesOriginalDisplayName
+                || span.dataset.jadgesGlobalOriginalName
+                || span.getAttribute("data-username-with-effects")
+                || span.textContent?.trim();
+            if (!original) continue;
+
+            const userId = matchingProfileId(original, profiles);
+            const customName = userId ? profiles[userId]?.username?.trim() : undefined;
+            if (!customName) continue;
+
+            if (!span.dataset.jadgesOriginalDisplayName && !span.dataset.jadgesGlobalOriginalName) {
+                span.dataset.jadgesGlobalOriginalName = original;
+            }
+            span.textContent = customName;
+            span.setAttribute("data-username-with-effects", customName);
+
+            const scope = span.closest<HTMLElement>('[class*="userProfile"],[class*="profilePopout"],[class*="profileModal"],[role="dialog"],[class*="biteSize"],[class*="fullSize"]');
+            if (!scope) continue;
+            for (const userTag of scope.querySelectorAll<HTMLElement>(USER_TAG_SELECTOR)) {
+                if (!userTag.dataset.jadgesOriginalUserTag) {
+                    userTag.dataset.jadgesOriginalUserTag = userTag.textContent?.trim() || original;
+                }
+                userTag.textContent = customName;
+            }
+        }
+    } catch (error) {
+        console.warn("[JadgesBadges] Global custom-name sync failed:", error);
+    } finally {
+        syncingGlobalNames = false;
+    }
+}
+
+function startGlobalCustomNameSync(): void {
+    void syncAllUsernameEffects();
+    clearInterval(globalNameTimer);
+    globalNameTimer = setInterval(() => void syncAllUsernameEffects(), 1_000);
+}
+
+function stopGlobalCustomNameSync(): void {
+    clearInterval(globalNameTimer);
+    globalNameTimer = undefined;
+    for (const span of document.querySelectorAll<HTMLElement>(DISPLAY_NAME_SELECTOR)) {
+        const original = span.dataset.jadgesGlobalOriginalName;
+        if (!original) continue;
+        span.textContent = original;
+        span.setAttribute("data-username-with-effects", original);
+        delete span.dataset.jadgesGlobalOriginalName;
+    }
+}
+
 function restoreGuards(): void {
     if (originalFetch) globalThis.fetch = originalFetch;
     if (originalQuerySelectorAll) document.querySelectorAll = originalQuerySelectorAll;
@@ -207,6 +290,7 @@ async function startWithoutGlobalBadgeClick(): Promise<void> {
     try {
         await (basePlugin as any).start?.();
         startUpdateChecker();
+        startGlobalCustomNameSync();
         startThemeSync();
         startVisibilitySync();
         startProfileVisibilityReporter();
@@ -219,7 +303,7 @@ async function startWithoutGlobalBadgeClick(): Promise<void> {
 export default definePlugin({
     name: "JadgesBadges",
     description: "Displays Jadges badges, native badge ordering, themes, and verified updates.",
-    authors: [{ name: "Jaycord", id: 0n }],
+    authors: [{ name: "jayden", id: 1439230248100036798n }],
     dependencies: ["BadgeAPI"],
     options: (basePlugin as any).options,
     start: startWithoutGlobalBadgeClick,
@@ -229,6 +313,7 @@ export default definePlugin({
             stopProfileVisibilityReporter();
             stopVisibilitySync();
             stopThemeSync();
+            stopGlobalCustomNameSync();
             stopUpdateChecker();
             (basePlugin as any).stop?.();
         } finally {
