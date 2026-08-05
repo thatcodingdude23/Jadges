@@ -15,27 +15,63 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Publish v46
+      - name: Publish v47
         run: |
           python3 - <<'PY'
           import json
           import re
           from pathlib import Path
 
+          index = Path('vencord-plugin/jadgesBadges/index.tsx')
+          text = index.read_text()
+
+          old_apply = '''            textNode.nodeValue = `${customName} `;
+            messageName.setAttribute("data-text", customName);'''
+          new_apply = '''            textNode.nodeValue = `${customName} `;
+            messageName.setAttribute("data-text", customName);
+
+            for (const suffix of messageName.querySelectorAll<HTMLElement>('[class*="vc-smyn-suffix"]')) {
+                if (!suffix.dataset.jadgesMessageOriginalSuffix) {
+                    suffix.dataset.jadgesMessageOriginalSuffix = suffix.textContent?.trim() || identity;
+                }
+                suffix.textContent = customName;
+            }'''
+          if old_apply not in text:
+              raise SystemExit('message apply block not found')
+          text = text.replace(old_apply, new_apply)
+
+          old_restore = '''        if (textNode && originalText) textNode.nodeValue = `${originalText} `;
+        if (originalDataText) messageName.setAttribute("data-text", originalDataText);
+        delete messageName.dataset.jadgesMessageOriginalText;
+        delete messageName.dataset.jadgesMessageOriginalDataText;'''
+          new_restore = '''        if (textNode && originalText) textNode.nodeValue = `${originalText} `;
+        if (originalDataText) messageName.setAttribute("data-text", originalDataText);
+        for (const suffix of messageName.querySelectorAll<HTMLElement>('[class*="vc-smyn-suffix"]')) {
+            const originalSuffix = suffix.dataset.jadgesMessageOriginalSuffix;
+            if (!originalSuffix) continue;
+            suffix.textContent = originalSuffix;
+            delete suffix.dataset.jadgesMessageOriginalSuffix;
+        }
+        delete messageName.dataset.jadgesMessageOriginalText;
+        delete messageName.dataset.jadgesMessageOriginalDataText;'''
+          if old_restore not in text:
+              raise SystemExit('message restore block not found')
+          index.write_text(text.replace(old_restore, new_restore))
+
           updater = Path('vencord-plugin/jadgesBadges/updater.ts')
-          updater.write_text(re.sub(r'const CURRENT_UPDATE_VERSION = \d+;', 'const CURRENT_UPDATE_VERSION = 46;', updater.read_text()))
+          updater.write_text(re.sub(r'const CURRENT_UPDATE_VERSION = \d+;', 'const CURRENT_UPDATE_VERSION = 47;', updater.read_text()))
 
           server = Path('src/vencordUpdateDashboardIntegration.ts')
-          server.write_text(re.sub(r'const UPDATE_VERSION = \d+;', 'const UPDATE_VERSION = 46;', server.read_text()))
+          server.write_text(re.sub(r'const UPDATE_VERSION = \d+;', 'const UPDATE_VERSION = 47;', server.read_text()))
 
-          Path('vencord-plugin/update.json').write_text(json.dumps({'version': 46}, indent=2) + '\n')
-          Path('__trigger_v46').unlink(missing_ok=True)
+          Path('vencord-plugin/update.json').write_text(json.dumps({'version': 47}, indent=2) + '\n')
+          Path('__trigger_v47').unlink(missing_ok=True)
           PY
-      - name: Commit v46
+      - name: Commit v47
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --quiet && exit 0
-          git commit -m "Publish Jadges Vencord v46"
+          git commit -m "Publish Jadges Vencord v47"
           git push
