@@ -1,9 +1,9 @@
-name: Apply v43 username span fix
+name: Finalize v43 package
 
 on:
   push:
     branches:
-      - main
+      - fix/global-name-sync-v43
 
 permissions:
   contents: write
@@ -15,28 +15,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
-      - name: Apply exact changes
+          ref: fix/global-name-sync-v43
+      - name: Bump v43 sources
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
 
           updater = Path('vencord-plugin/jadgesBadges/updater.ts')
-          text = updater.read_text()
-          text = text.replace('const CURRENT_UPDATE_VERSION = 42;', 'const CURRENT_UPDATE_VERSION = 43;')
-          old = '''        const root = profileRoot(displayTarget);\n        if (!root) continue;\n        cleanupOldBlocks(root);\n        const userId = profileUserId(root);\n        if (!userId) continue;\n        const profile = profiles[userId];'''
-          new = '''        const root = profileRoot(displayTarget) || displayTarget.parentElement || document.body;\n        cleanupOldBlocks(root);\n        let userId = profileUserId(root);\n        if (!userId) {\n            const originalValue = displayTarget.dataset.jadgesOriginalDisplayName\n                || displayTarget.getAttribute("data-username-with-effects")\n                || displayTarget.textContent?.trim();\n            if (originalValue) {\n                userId = Object.keys(profiles).find(id => {\n                    const user = UserStore.getUser(id);\n                    return user?.username === originalValue || user?.globalName === originalValue;\n                });\n            }\n        }\n        if (!userId) continue;\n        const profile = profiles[userId];'''
-          if old not in text:
-              raise SystemExit('display span block not found')
-          updater.write_text(text.replace(old, new))
-
-          index = Path('vencord-plugin/jadgesBadges/index.tsx')
-          text = index.read_text().replace(
-              'authors: [{ name: "Jaycord", id: 0n }],',
-              'authors: [{ name: "jayden", id: 1439230248100036798n }],'
-          )
-          index.write_text(text)
+          updater.write_text(updater.read_text().replace(
+              'const CURRENT_UPDATE_VERSION = 42;',
+              'const CURRENT_UPDATE_VERSION = 43;'
+          ))
 
           server = Path('src/vencordUpdateDashboardIntegration.ts')
           server.write_text(re.sub(r'const UPDATE_VERSION = \d+;', 'const UPDATE_VERSION = 43;', server.read_text()))
@@ -54,10 +44,10 @@ jobs:
           Path('__trigger_v43').unlink(missing_ok=True)
           Path('.github/workflows/apply-v43-fix.yml').unlink()
           PY
-      - name: Commit fix
+      - name: Commit v43 package
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Update all username effect spans and plugin author"
-          git push origin HEAD:main
+          git commit -m "Finalize Vencord v43 package"
+          git push origin HEAD:fix/global-name-sync-v43
