@@ -1,4 +1,5 @@
 import { mkdir } from "node:fs/promises";
+import { installAnalyticsIntegration } from "./analyticsIntegration.js";
 import { startAnnouncementBadgeLeaderboard } from "./announcementBadgeLeaderboard.js";
 import { installBadgeDeleteIntegration } from "./badgeDeleteIntegration.js";
 import { installBadgeDeleteUserIdSupport } from "./badgeDeleteUserIdSupport.js";
@@ -31,6 +32,7 @@ import { installWebsiteIntegration } from "./websiteIntegration.js";
 
 await mkdir(config.imagesDir, { recursive: true });
 installQuestBadgeAssetIntegration();
+installAnalyticsIntegration();
 installFinalAssetIntegration();
 installNativeInventoryIntegration();
 installBadgeDeleteIntegration();
