@@ -28,6 +28,7 @@ import { installRearrangeSecurity } from "./rearrangeSecurity.js";
 import { startServer } from "./server.js";
 import { startStatusPanel } from "./statusPanel.js";
 import { startJadgesSupportBot } from "./supportBot.js";
+import { installVencordUpdateDashboardIntegration } from "./vencordUpdateDashboardIntegration.js";
 import { installVisibilityIntegration } from "./visibilityIntegration.js";
 import { installWebsiteIntegration } from "./websiteIntegration.js";
 
@@ -58,6 +59,8 @@ installPresetModerationWebsite();
 installPresetOwnerDeleteIntegration();
 installPresetMarketplaceIntegration();
 installRearrangeSecurity();
+// Keep this last so its dashboard transform sees the final HTML produced by every wrapper.
+installVencordUpdateDashboardIntegration();
 const server = startServer();
 const client = await startDiscordBot();
 const badgeQuests = await installBadgeQuests(client);
