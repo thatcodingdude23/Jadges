@@ -3,8 +3,6 @@ import http, { type RequestListener, type ServerResponse } from "node:http";
 const UPDATE_VERSION = 47;
 let installed = false;
 
-const customProfileLink = `<a class="nav-link" href="/custom-profile"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c.7-4.3 3.4-7 8-7s7.3 2.7 8 7"/><path d="M18 4v4M16 6h4"/></svg>Custom Profile</a>`;
-
 function sendManifest(response: ServerResponse): void {
   const body = JSON.stringify({ version: UPDATE_VERSION });
   response.writeHead(200, {
@@ -16,9 +14,116 @@ function sendManifest(response: ServerResponse): void {
   response.end(body);
 }
 
-function interceptHtml(response: ServerResponse, transform: (body: string) => string): void {
+function dashboardTabScript(): string {
+  return `<script>
+(() => {
+  const nav = document.querySelector('.sidebar-nav');
+  const wrap = document.querySelector('.dashboard-wrap');
+  const dataNode = document.getElementById('jadges-data');
+  if (!nav || !wrap || !dataNode || nav.querySelector('[data-dashboard-tab="customprofile"]')) return;
+
+  let dashboardData = {};
+  try { dashboardData = JSON.parse(dataNode.textContent || '{}'); } catch {}
+  const userId = dashboardData && dashboardData.profile && dashboardData.profile.id;
+  const realName = dashboardData && dashboardData.profile
+    ? (dashboardData.profile.displayName || dashboardData.profile.username || 'Discord user')
+    : 'Discord user';
+
+  const link = document.createElement('a');
+  link.className = 'nav-link';
+  link.href = '#customprofile';
+  link.dataset.dashboardTab = 'customprofile';
+  link.innerHTML = '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c.8-4.4 3.5-7 8-7s7.2 2.6 8 7"/><path d="M18 4v4M16 6h4"/></svg>Custom Profile';
+  const adminLink = Array.from(nav.querySelectorAll('.nav-link')).find(item => item.getAttribute('href') === '/admin');
+  nav.insertBefore(link, adminLink || null);
+
+  const style = document.createElement('style');
+  style.textContent = '.custom-profile-page{padding-bottom:70px}.custom-profile-grid{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(320px,.88fr);gap:24px;align-items:start}.custom-profile-panel{background:linear-gradient(180deg,#111827,#0d1422);border:1px solid #252f43;border-radius:18px;box-shadow:0 18px 60px rgba(0,0,0,.24)}.custom-profile-editor{padding:26px}.custom-profile-editor h2,.custom-profile-preview h2{margin:0;font-size:20px}.custom-profile-subtitle{margin:7px 0 22px;color:#909cb1}.custom-profile-field{display:block;margin-top:18px;font-weight:800}.custom-profile-field span{display:block;margin-bottom:8px}.custom-profile-field small{display:block;margin-top:7px;color:#77849a;font-weight:550}.custom-profile-input{width:100%;height:48px;padding:0 14px;border:1px solid #303b52;border-radius:11px;background:#080e19;color:#fff;font:inherit;outline:none}.custom-profile-input:focus{border-color:#7c5cff;box-shadow:0 0 0 3px rgba(124,92,255,.15)}.custom-profile-note{margin-top:20px;padding:14px 15px;border:1px solid #2a3550;border-radius:12px;background:#0a1221;color:#aeb8ca}.custom-profile-actions{display:flex;align-items:center;gap:12px;margin-top:22px;flex-wrap:wrap}.custom-profile-save,.custom-profile-clear{padding:12px 18px;border-radius:11px;font:inherit;font-weight:850;cursor:pointer}.custom-profile-save{border:0;background:linear-gradient(135deg,#7657ff,#5f7cff);color:#fff}.custom-profile-clear{border:1px solid #303b52;background:transparent;color:#cbd2df}.custom-profile-status{color:#8ee3b0;font-weight:700}.custom-profile-preview{overflow:hidden}.custom-profile-preview-head{padding:22px 24px;border-bottom:1px solid #242e41}.custom-profile-preview-body{padding:26px}.custom-discord-card{overflow:hidden;border-radius:16px;background:#16181d;border:1px solid #30333b}.custom-profile-banner{height:98px;background:radial-gradient(circle at 18% 30%,rgba(154,119,255,.8),transparent 30%),linear-gradient(135deg,#322367,#19274f)}.custom-profile-card-body{padding:0 18px 20px}.custom-profile-avatar{width:74px;height:74px;margin-top:-37px;border:6px solid #16181d;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,#7657ff,#35446d);font-size:28px;font-weight:900}.custom-profile-name{margin-top:11px;font-size:21px;font-weight:900}.custom-profile-original{margin-top:2px;color:#929aa8;font-size:12px}.custom-profile-divider{height:1px;margin:16px 0;background:#33363d}.custom-profile-label{color:#b9bec8;font-size:11px;font-weight:850;text-transform:uppercase}.custom-profile-value{margin-top:5px}.custom-profile-help{margin-top:16px;color:#7f8ba0;font-size:13px}@media(max-width:900px){.custom-profile-grid{grid-template-columns:1fr}}';
+  document.head.append(style);
+
+  function escapeAttribute(value) {
+    return String(value || '').replaceAll('&', '&amp;').replaceAll('"', '&quot;');
+  }
+
+  function activateCustomLink() {
+    nav.querySelectorAll('.nav-link').forEach(item => item.classList.toggle('active', item === link));
+  }
+
+  async function openCustomProfile() {
+    activateCustomLink();
+    let profile = {};
+    try {
+      const response = await fetch('/custom-profiles.json?t=' + Date.now(), { cache: 'no-store' });
+      const profiles = await response.json();
+      profile = profiles && profiles[userId] ? profiles[userId] : {};
+    } catch {}
+
+    const username = profile.username || '';
+    const date = profile.createdAt ? String(profile.createdAt).slice(0, 10) : '';
+    wrap.innerHTML = '<div class="custom-profile-page"><div class="page-heading"><h1>Custom Profile</h1><p>Change your cosmetic username and account creation date without leaving the dashboard. Your real Discord account is never changed.</p></div><div class="custom-profile-grid"><section class="custom-profile-panel custom-profile-editor"><h2>Profile details</h2><p class="custom-profile-subtitle">Leave a field blank to use the original Discord value.</p><form id="custom-profile-form"><label class="custom-profile-field"><span>Custom username</span><input class="custom-profile-input" id="custom-profile-name" maxlength="32" value="' + escapeAttribute(username) + '" placeholder="Enter a cosmetic name"><small>Used across supported Jadges profiles, messages, and sidebars.</small></label><label class="custom-profile-field"><span>Custom account creation date</span><input class="custom-profile-input" id="custom-profile-date" type="date" min="1900-01-01" value="' + escapeAttribute(date) + '"><small>Shown as the cosmetic Member Since date.</small></label><div class="custom-profile-note">Jadges keeps the original username and original creation date visible underneath the cosmetic values.</div><div class="custom-profile-actions"><button class="custom-profile-save" type="submit">Save changes</button><button class="custom-profile-clear" id="custom-profile-clear" type="button">Clear custom profile</button><span class="custom-profile-status" id="custom-profile-status"></span></div></form></section><aside class="custom-profile-panel custom-profile-preview"><div class="custom-profile-preview-head"><h2>Live preview</h2><p class="custom-profile-subtitle">A separate visual style inside the dashboard.</p></div><div class="custom-profile-preview-body"><div class="custom-discord-card"><div class="custom-profile-banner"></div><div class="custom-profile-card-body"><div class="custom-profile-avatar">J</div><div class="custom-profile-name" id="custom-profile-preview-name"></div><div class="custom-profile-original">Originally, ' + realName + '</div><div class="custom-profile-divider"></div><div class="custom-profile-label">Member Since</div><div class="custom-profile-value" id="custom-profile-preview-date"></div><div class="custom-profile-original">Originally, your real Discord account creation date</div></div></div><p class="custom-profile-help">This is visual only. Authentication and Discord account data remain unchanged.</p></div></aside></div></div>';
+
+    const nameInput = document.getElementById('custom-profile-name');
+    const dateInput = document.getElementById('custom-profile-date');
+    const status = document.getElementById('custom-profile-status');
+    const updatePreview = () => {
+      document.getElementById('custom-profile-preview-name').textContent = nameInput.value.trim() || realName;
+      document.getElementById('custom-profile-preview-date').textContent = dateInput.value || 'Original Discord date';
+    };
+    nameInput.addEventListener('input', updatePreview);
+    dateInput.addEventListener('input', updatePreview);
+    updatePreview();
+
+    document.getElementById('custom-profile-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      status.textContent = 'Saving…';
+      const response = await fetch('/api/custom-profile', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: nameInput.value, createdAt: dateInput.value }),
+      });
+      const result = await response.json().catch(() => ({}));
+      status.textContent = response.ok ? 'Saved' : (result.error || 'Could not save');
+    });
+
+    document.getElementById('custom-profile-clear').addEventListener('click', async () => {
+      nameInput.value = '';
+      dateInput.value = '';
+      updatePreview();
+      status.textContent = 'Clearing…';
+      const response = await fetch('/api/custom-profile', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ username: '', createdAt: '' }),
+      });
+      status.textContent = response.ok ? 'Cleared' : 'Could not clear';
+    });
+  }
+
+  link.addEventListener('click', event => {
+    event.preventDefault();
+    history.pushState(null, '', '/dashboard#customprofile');
+    void openCustomProfile();
+  });
+
+  nav.querySelectorAll('.nav-link:not([data-dashboard-tab="customprofile"])').forEach(item => {
+    item.addEventListener('click', () => {
+      if (location.hash === '#customprofile' && item.getAttribute('href')?.startsWith('#')) location.reload();
+    });
+  });
+
+  window.addEventListener('hashchange', () => {
+    if (location.hash === '#customprofile') void openCustomProfile();
+  });
+
+  if (location.hash === '#customprofile') void openCustomProfile();
+})();
+</script>`;
+}
+
+function injectDashboardTab(response: ServerResponse): void {
   const originalEnd = response.end.bind(response);
   let ended = false;
+
   response.end = ((chunk?: any, encoding?: any, callback?: any): ServerResponse => {
     if (ended) return response;
     ended = true;
@@ -26,61 +131,19 @@ function interceptHtml(response: ServerResponse, transform: (body: string) => st
       originalEnd(chunk, encoding, callback);
       return response;
     }
+
     const body = Buffer.isBuffer(chunk)
       ? chunk.toString("utf8")
       : chunk instanceof Uint8Array
         ? Buffer.from(chunk).toString("utf8")
         : String(chunk);
-    originalEnd(transform(body), "utf8", callback);
+
+    const nextBody = body.includes("data-dashboard-tab=\"customprofile\"")
+      ? body
+      : body.replace("</body>", `${dashboardTabScript()}</body>`);
+    originalEnd(nextBody, "utf8", callback);
     return response;
   }) as typeof response.end;
-}
-
-function addDashboardLink(body: string): string {
-  if (body.includes('href="/custom-profile"')) return body;
-  const spacer = '<div class="sidebar-spacer">';
-  const spacerIndex = body.indexOf(spacer);
-  if (spacerIndex !== -1) {
-    const navEnd = body.lastIndexOf("</nav>", spacerIndex);
-    if (navEnd !== -1) return `${body.slice(0, navEnd)}${customProfileLink}\n      ${body.slice(navEnd)}`;
-  }
-  const appearance = /(<a class="nav-link" href="#appearance"[\s\S]*?<\/a>)/;
-  return appearance.test(body) ? body.replace(appearance, `$1\n        ${customProfileLink}`) : body;
-}
-
-function dashboardCustomProfile(body: string): string {
-  if (!body.includes("<title>Custom Profile")) return body;
-
-  const dashboardCss = `
-  .cp-shell{min-height:100vh;display:grid;grid-template-columns:238px 1fr;background:#070b14}
-  .cp-sidebar{height:100vh;position:sticky;top:0;padding:24px 16px;background:#080d17;border-right:1px solid #1a2233;display:flex;flex-direction:column}
-  .cp-brand{display:flex;align-items:center;gap:13px;padding:0 10px 24px;color:#fff;text-decoration:none;font-size:20px;font-weight:850}
-  .cp-mark{width:28px;height:35px;border:4px solid #7c5cff;border-top:0;border-right:0;border-radius:0 0 0 15px}
-  .cp-nav{display:grid;gap:8px}.cp-nav a{display:flex;align-items:center;gap:13px;min-height:44px;padding:0 13px;border-radius:11px;color:#9ca8bd;text-decoration:none;font-weight:760;margin:0}
-  .cp-nav a:hover{background:#11182a;color:#fff}.cp-nav a.active{background:#201c51;color:#fff;border:1px solid #39317b}
-  .cp-nav svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8}.cp-spacer{flex:1}.cp-foot{padding:12px 10px;color:#647087;font-size:12px}
-  .cp-main{min-width:0}.cp-topbar{height:76px;padding:0 32px;border-bottom:1px solid #192235;display:flex;align-items:center;justify-content:flex-end;background:rgba(7,11,20,.84);backdrop-filter:blur(14px)}
-  .cp-topbar a{margin:0;color:#aab4c8;border:0;padding:0}.cp-content{width:min(1080px,calc(100% - 48px));margin:0 auto;padding:42px 0 70px}.cp-heading{margin-bottom:26px}.cp-eyebrow{color:#8d7cff;font-size:12px;font-weight:850;letter-spacing:.13em;text-transform:uppercase}.cp-heading h1{font-size:38px;margin:8px 0 10px}.cp-heading p{max-width:720px;margin:0;color:#9ca8bd}
-  .cp-layout{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(310px,.85fr);gap:24px;align-items:start}.cp-editor,.cp-preview{background:linear-gradient(180deg,#111827,#0d1422);border:1px solid #252f43;border-radius:18px;box-shadow:0 18px 60px rgba(0,0,0,.24)}
-  .cp-editor{padding:26px}.cp-editor.card{padding:26px}.cp-editor h1{display:none}.cp-editor>p:first-of-type{margin-top:0}.cp-editor label{margin-top:20px}.cp-editor input{height:48px;padding:0 14px;background:#080e19;border:1px solid #303b52}.cp-editor input:focus{outline:none;border-color:#7c5cff;box-shadow:0 0 0 3px rgba(124,92,255,.15)}.cp-editor button{background:linear-gradient(135deg,#7657ff,#5f7cff)}.cp-editor a{display:none}
-  .cp-preview{overflow:hidden}.cp-preview-head{padding:22px 24px;border-bottom:1px solid #242e41}.cp-preview-head h2{margin:0;font-size:19px}.cp-preview-head p{margin:7px 0 0}.cp-preview-body{padding:26px}.cp-card{overflow:hidden;border:1px solid #30333b;border-radius:16px;background:#16181d}.cp-banner{height:96px;background:radial-gradient(circle at 18% 30%,rgba(154,119,255,.8),transparent 30%),linear-gradient(135deg,#322367,#19274f)}.cp-profile{padding:0 18px 20px}.cp-avatar{width:74px;height:74px;margin-top:-37px;border:6px solid #16181d;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,#7657ff,#35446d);font-size:28px;font-weight:900}.cp-name{margin-top:11px;font-size:21px;font-weight:900}.cp-original{margin-top:2px;color:#929aa8;font-size:12px}.cp-divider{height:1px;margin:16px 0;background:#33363d}.cp-label{color:#b9bec8;font-size:11px;font-weight:850;text-transform:uppercase}.cp-value{margin-top:5px}.cp-help{margin-top:16px;color:#7f8ba0;font-size:13px}
-  @media(max-width:820px){.cp-shell{grid-template-columns:1fr}.cp-sidebar{height:auto;position:static;padding:14px}.cp-brand{padding-bottom:12px}.cp-nav{grid-template-columns:repeat(4,minmax(0,1fr))}.cp-nav a{justify-content:center;font-size:0}.cp-nav svg{width:21px;height:21px}.cp-spacer,.cp-foot,.cp-topbar{display:none}.cp-content{width:min(100% - 28px,720px);padding-top:28px}.cp-layout{grid-template-columns:1fr}}
-  `;
-
-  body = body.replace("</style>", `${dashboardCss}</style>`);
-  body = body.replace(
-    '<body><main class="wrap"><section class="card">',
-    `<body><div class="cp-shell"><aside class="cp-sidebar"><a class="cp-brand" href="/"><span class="cp-mark"></span><span>Jadges</span></a><nav class="cp-nav"><a href="/dashboard"><svg viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v9H4v-9Z"/><path d="M9 20v-6h6v6"/></svg>Dashboard</a><a href="/dashboard#badges"><svg viewBox="0 0 24 24"><path d="m12 3 7 3v5c0 4.6-2.8 8.2-7 10-4.2-1.8-7-5.4-7-10V6l7-3Z"/></svg>Badges</a><a href="/dashboard#appearance"><svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.2 0 2-1 1.5-2-.7-1.5.4-3 2-3h2.2A3.3 3.3 0 0 0 21 12.7 9.7 9.7 0 0 0 12 3Z"/></svg>Appearance</a><a class="active" href="/custom-profile"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c.8-4.4 3.5-7 8-7s7.2 2.6 8 7"/><path d="M18 4v4M16 6h4"/></svg>Custom Profile</a></nav><div class="cp-spacer"></div><div class="cp-foot">Jadges Dashboard • Custom profiles</div></aside><main class="cp-main"><header class="cp-topbar"><a href="/dashboard">← Back to dashboard</a></header><div class="cp-content"><div class="cp-heading"><div class="cp-eyebrow">Cosmetic identity</div><h1>Custom Profile</h1><p>Change how your username and account creation date look inside supported Jadges clients. Your real Discord account is never changed.</p></div><div class="cp-layout"><section class="card cp-editor">`,
-  );
-  body = body.replace(
-    "</section></main></body>",
-    `</section><aside class="cp-preview"><div class="cp-preview-head"><h2>Live preview</h2><p>A different visual style for your cosmetic identity.</p></div><div class="cp-preview-body"><div class="cp-card"><div class="cp-banner"></div><div class="cp-profile"><div class="cp-avatar">J</div><div class="cp-name" id="cp-preview-name">Custom name</div><div class="cp-original">Originally, your Discord username</div><div class="cp-divider"></div><div class="cp-label">Member Since</div><div class="cp-value" id="cp-preview-date">Custom creation date</div><div class="cp-original">Originally, your real account creation date</div></div></div><p class="cp-help">This preview is visual only. Authentication and Discord account data remain unchanged.</p></div></aside></div></div></main></div></body>`,
-  );
-  body = body.replace(
-    "document.getElementById('profile').addEventListener",
-    `const cpForm=document.getElementById('profile');const cpName=cpForm.elements.username;const cpDate=cpForm.elements.createdAt;const cpUpdate=()=>{document.getElementById('cp-preview-name').textContent=cpName.value.trim()||'Custom name';document.getElementById('cp-preview-date').textContent=cpDate.value||'Custom creation date'};cpName.addEventListener('input',cpUpdate);cpDate.addEventListener('input',cpUpdate);cpUpdate();document.getElementById('profile').addEventListener`,
-  );
-  return body;
 }
 
 function wrap(listener: RequestListener): RequestListener {
@@ -91,9 +154,7 @@ function wrap(listener: RequestListener): RequestListener {
       return;
     }
     if (request.method === "GET" && url.pathname === "/dashboard") {
-      interceptHtml(response, addDashboardLink);
-    } else if (request.method === "GET" && url.pathname === "/custom-profile") {
-      interceptHtml(response, dashboardCustomProfile);
+      injectDashboardTab(response);
     }
     listener(request, response);
   };
