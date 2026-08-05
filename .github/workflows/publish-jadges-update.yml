@@ -15,54 +15,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Fix final dashboard sidebar builder
+      - name: Patch final dashboard sidebar
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path('src/websiteIntegration.ts')
           text = path.read_text()
 
-          old_function = '''function installAdminDashboardLink(response: ServerResponse): void {
-  const originalEnd = response.end.bind(response);
-  let ended = false;
-
-  response.end = ((
-    chunk?: any,
-    encoding?: any,
-    callback?: any,
-  ): ServerResponse => {
-    if (ended) return response;
-    ended = true;
-
-    if (
-      chunk === undefined
-      || response.statusCode < 200
-      || response.statusCode >= 300
-    ) {
-      originalEnd(chunk, encoding, callback);
-      return response;
-    }
-
-    const body = Buffer.isBuffer(chunk)
-      ? chunk.toString("utf8")
-      : chunk instanceof Uint8Array
-        ? Buffer.from(chunk).toString("utf8")
-        : String(chunk);
-
-    const marker = `</nav>\n      <div class="sidebar-spacer">`;
-    const adminLink = `<a class="nav-link" href="/admin"><svg viewBox="0 0 24 24"><path d="M12 3 20 6v5c0 5-3.2 8.7-8 10-4.8-1.3-8-5-8-10V6l8-3Z"/><path d="M9.5 12.2 11.2 14l3.7-4"/></svg>Admin Panel</a>\n      </nav>\n      <div class="sidebar-spacer">`;
-
-    originalEnd(
-      body.includes(marker) ? body.replace(marker, adminLink) : body,
-      "utf8",
-      callback,
-    );
-    return response;
-  }) as typeof response.end;
-}'''
-
-          new_function = '''function installDashboardLinks(response: ServerResponse, includeAdmin: boolean): void {
+          replacement = r'''function installDashboardLinks(response: ServerResponse, includeAdmin: boolean): void {
   const originalEnd = response.end.bind(response);
   let ended = false;
 
@@ -94,34 +56,30 @@ jobs:
     const adminLink = `<a class="nav-link" href="/admin"><svg viewBox="0 0 24 24"><path d="M12 3 20 6v5c0 5-3.2 8.7-8 10-4.8-1.3-8-5-8-10V6l8-3Z"/><path d="M9.5 12.2 11.2 14l3.7-4"/></svg>Admin Panel</a>`;
     const links = `${customProfileLink}${includeAdmin ? `\n        ${adminLink}` : ""}\n      </nav>\n      <div class="sidebar-spacer">`;
 
-    let nextBody = body;
-    if (!nextBody.includes('href="/custom-profile"') && nextBody.includes(marker)) {
-      nextBody = nextBody.replace(marker, links);
-    }
+    const nextBody = !body.includes('href="/custom-profile"') && body.includes(marker)
+      ? body.replace(marker, links)
+      : body;
 
     originalEnd(nextBody, "utf8", callback);
     return response;
   }) as typeof response.end;
 }'''
 
-          if old_function not in text:
-              raise SystemExit('old dashboard link function not found')
-          text = text.replace(old_function, new_function)
+          function_pattern = r'function installAdminDashboardLink\(response: ServerResponse\): void \{.*?\n\}\n\nfunction wrap'
+          text, count = re.subn(function_pattern, replacement + '\n\nfunction wrap', text, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit('dashboard link function was not replaced')
 
-          old_block = '''          if (
-            url.pathname === "/dashboard"
-            && await canAccessAdminPanel(userId)
-          ) {
-            installAdminDashboardLink(response);
-          }'''
-          new_block = '''          if (url.pathname === "/dashboard") {
+          call_pattern = r'''          if \(\n            url\.pathname === "/dashboard"\n            && await canAccessAdminPanel\(userId\)\n          \) \{\n            installAdminDashboardLink\(response\);\n          \}'''
+          call_replacement = '''          if (url.pathname === "/dashboard") {
             installDashboardLinks(response, await canAccessAdminPanel(userId));
           }'''
-          if old_block not in text:
-              raise SystemExit('old dashboard link call not found')
-          text = text.replace(old_block, new_block)
+          text, count = re.subn(call_pattern, call_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit('dashboard link call was not replaced')
 
           path.write_text(text)
+          Path('__trigger_sidebar_fix_2').unlink(missing_ok=True)
           Path('__trigger_sidebar_fix').unlink(missing_ok=True)
           PY
       - name: Commit sidebar fix
