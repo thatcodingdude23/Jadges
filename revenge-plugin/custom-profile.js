@@ -2,7 +2,7 @@
   "use strict";
 
   const API_URL = "https://jadges.onrender.com/custom-profiles.json";
-  const REFRESH_INTERVAL = 5000;
+  const REFRESH_INTERVAL = 750;
   let profiles = {};
   let timer;
   let unpatchGetUser;
@@ -10,14 +10,6 @@
 
   function logger() {
     return vendetta?.logger ?? console;
-  }
-
-  function originalTimestamp(userId) {
-    try {
-      return Number((BigInt(userId) >> 22n) + 1420070400000n);
-    } catch {
-      return undefined;
-    }
   }
 
   function validProfile(value) {
@@ -91,7 +83,7 @@
 
   async function refresh() {
     try {
-      const response = await vendetta.utils.safeFetch(API_URL, { cache: "no-store" });
+      const response = await vendetta.utils.safeFetch(`${API_URL}?t=${Date.now()}`, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       if (data && typeof data === "object" && !Array.isArray(data)) profiles = data;
@@ -105,7 +97,7 @@
     patchUserStore();
     patchSnowflakeTimestamp();
     timer = setInterval(() => void refresh(), REFRESH_INTERVAL);
-    logger().log("[JadgesCustomProfiles] Enabled for Kettu and Revenge");
+    logger().log("[JadgesCustomProfiles] Enabled with instant profile refresh for Kettu and Revenge");
   }
 
   function onUnload() {
