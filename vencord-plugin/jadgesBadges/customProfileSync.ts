@@ -1,5 +1,4 @@
 import { UserStore } from "@webpack/common";
-import { getCurrentProfileUserId } from "./base";
 
 interface CustomProfile { username?: string; createdAt?: string; }
 type CustomProfiles = Record<string, CustomProfile>;
@@ -10,24 +9,40 @@ let profiles: CustomProfiles = {};
 let timer: ReturnType<typeof setInterval> | undefined;
 let observer: MutationObserver | undefined;
 
+function profileRoot(): HTMLElement | null {
+    return document.querySelector<HTMLElement>('[class*="userProfile"], [class*="profilePopout"], [class*="profileModal"]');
+}
+
+function profileUserId(root: HTMLElement): string | undefined {
+    for (const image of root.querySelectorAll<HTMLImageElement>("img")) {
+        const match = image.src.match(/\/avatars\/(\d{15,22})\//);
+        if (match?.[1]) return match[1];
+    }
+    for (const element of root.querySelectorAll<HTMLElement>("[data-user-id]")) {
+        const id = element.dataset.userId;
+        if (id && /^\d{15,22}$/.test(id)) return id;
+    }
+    return undefined;
+}
+
 function originalCreatedAt(userId: string): Date {
     return new Date(Number((BigInt(userId) >> 22n) + 1420070400000n));
 }
 
 function formats(date: Date): string[] {
-    return [
+    return [...new Set([
         new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(date),
         new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric" }).format(date),
         new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" }).format(date),
         new Intl.DateTimeFormat(undefined, { month: "long", day: "numeric", year: "numeric" }).format(date)
-    ];
+    ])];
 }
 
-function appendOriginal(element: HTMLElement, text: string, kind: string): void {
+function appendOriginal(element: HTMLElement, text: string, kind: "username" | "date"): void {
     const parent = element.parentElement;
     if (!parent || parent.querySelector(`[data-jadges-original-${kind}]`)) return;
     const line = document.createElement("div");
-    line.dataset[`jadgesOriginal${kind[0].toUpperCase()}${kind.slice(1)}`] = "true";
+    line.setAttribute(`data-jadges-original-${kind}`, "true");
     line.textContent = text;
     line.style.fontSize = "12px";
     line.style.opacity = "0.7";
@@ -36,24 +51,24 @@ function appendOriginal(element: HTMLElement, text: string, kind: string): void 
 }
 
 function applyCustomProfile(): void {
-    const userId = getCurrentProfileUserId();
+    const root = profileRoot();
+    if (!root) return;
+    const userId = profileUserId(root);
     if (!userId) return;
     const profile = profiles[userId];
     if (!profile) return;
     const user = UserStore.getUser(userId);
     if (!user) return;
 
-    const root = document.querySelector<HTMLElement>('[class*="userProfile"], [class*="profilePopout"], [class*="profileModal"]');
-    if (!root) return;
-
     if (profile.username) {
-        const originalNames = new Set([user.username, user.globalName].filter(Boolean));
+        const originalNames = new Set([user.username, user.globalName].filter((value): value is string => Boolean(value)));
         for (const element of root.querySelectorAll<HTMLElement>("h1,h2,h3,span,div")) {
             const text = element.textContent?.trim();
             if (!text || !originalNames.has(text) || element.children.length > 0) continue;
-            if (!element.dataset.jadgesOriginalUsernameValue) element.dataset.jadgesOriginalUsernameValue = text;
+            const original = element.dataset.jadgesOriginalUsernameValue || text;
+            element.dataset.jadgesOriginalUsernameValue = original;
             element.textContent = profile.username;
-            appendOriginal(element, `Originally, ${text}`, "username");
+            appendOriginal(element, `Originally, ${original}`, "username");
             break;
         }
     }
@@ -65,9 +80,11 @@ function applyCustomProfile(): void {
         const custom = new Intl.DateTimeFormat(undefined, { month: "long", day: "numeric", year: "numeric" }).format(customDate);
         for (const element of root.querySelectorAll<HTMLElement>("span,div,time")) {
             const text = element.textContent?.trim();
-            if (!text || element.children.length > 0 || !originals.some(value => text.includes(value))) continue;
-            const matched = originals.find(value => text.includes(value))!;
-            if (!element.dataset.jadgesOriginalDateValue) element.dataset.jadgesOriginalDateValue = text;
+            if (!text || element.children.length > 0) continue;
+            const matched = originals.find(value => text.includes(value));
+            if (!matched) continue;
+            const original = element.dataset.jadgesOriginalDateValue || text;
+            element.dataset.jadgesOriginalDateValue = original;
             element.textContent = text.replace(matched, custom);
             appendOriginal(element, `Originally, ${new Intl.DateTimeFormat(undefined, { month: "long", day: "numeric", year: "numeric" }).format(originalDate)}`, "date");
             break;
@@ -79,8 +96,8 @@ async function refresh(): Promise<void> {
     try {
         const response = await fetch(API_URL, { cache: "no-store", credentials: "omit" });
         if (!response.ok) return;
-        const data = await response.json();
-        if (data && typeof data === "object" && !Array.isArray(data)) profiles = data;
+        const data: unknown = await response.json();
+        if (data && typeof data === "object" && !Array.isArray(data)) profiles = data as CustomProfiles;
         applyCustomProfile();
     } catch {}
 }
