@@ -3,9 +3,6 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { config } from "./config.js";
 
-const QUEST_BADGE_FILENAME = "10000000-0000-4000-8000-000000000099.png";
-const QUEST_BADGE_URL = "https://cdn3.emoji.gg/emojis/66366-completed-a-quest.png";
-
 const mimeExtensions: Record<string, string> = {
   "image/png": ".png",
   "image/jpeg": ".jpg",
@@ -54,6 +51,5 @@ export async function deleteStoredImage(filename: string): Promise<void> {
 }
 
 export function publicImageUrl(filename: string, origin = config.publicUrl): string {
-  if (filename === QUEST_BADGE_FILENAME) return QUEST_BADGE_URL;
   return `${origin.replace(/\/$/, "")}/badges/${encodeURIComponent(filename)}`;
 }
