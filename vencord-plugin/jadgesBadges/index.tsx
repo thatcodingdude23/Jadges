@@ -25,9 +25,8 @@ const CUSTOM_PROFILE_URL = "https://jadges.onrender.com/custom-profiles.json";
 const DISPLAY_NAME_SELECTOR = 'span[data-username-with-effects]';
 const USER_TAG_SELECTOR = 'span[class*="userTagUsername_"]';
 const PANEL_USERNAME_SELECTOR = '[class*="panelSubtextContainer_"] [class*="hovered_"]';
+const MESSAGE_USERNAME_SELECTOR = 'span[id^="message-username-"] > span[class*="username_"]';
 const SURFACE_NAME_SELECTOR = [
-    '[class*="messageListItem_"] [class*="username_"]',
-    '[class*="message_"] [class*="username_"]',
     '[class*="members_"] [class*="username_"]',
     '[class*="member_"] [class*="username_"]',
     '[class*="privateChannels_"] [class*="name_"]',
@@ -214,6 +213,10 @@ function customNameFor(originalName: string, profiles: CustomProfiles): string |
     return userId ? profiles[userId]?.username?.trim() : undefined;
 }
 
+function firstDirectTextNode(element: HTMLElement): Text | undefined {
+    return [...element.childNodes].find((node): node is Text => node.nodeType === Node.TEXT_NODE);
+}
+
 async function syncAllUsernameEffects(): Promise<void> {
     if (syncingGlobalNames) return;
     syncingGlobalNames = true;
@@ -264,6 +267,31 @@ async function syncAllUsernameEffects(): Promise<void> {
             panelName.textContent = customName;
         }
 
+        for (const messageName of document.querySelectorAll<HTMLElement>(MESSAGE_USERNAME_SELECTOR)) {
+            const textNode = firstDirectTextNode(messageName);
+            const originalDataText = messageName.dataset.jadgesMessageOriginalDataText
+                || messageName.getAttribute("data-text")
+                || undefined;
+            const originalText = messageName.dataset.jadgesMessageOriginalText
+                || textNode?.nodeValue?.trim()
+                || undefined;
+            const identity = originalDataText || originalText;
+            if (!identity || !textNode) continue;
+
+            const customName = customNameFor(identity, profiles);
+            if (!customName) continue;
+
+            if (!messageName.dataset.jadgesMessageOriginalText && originalText) {
+                messageName.dataset.jadgesMessageOriginalText = originalText;
+            }
+            if (!messageName.dataset.jadgesMessageOriginalDataText && originalDataText) {
+                messageName.dataset.jadgesMessageOriginalDataText = originalDataText;
+            }
+
+            textNode.nodeValue = `${customName} `;
+            messageName.setAttribute("data-text", customName);
+        }
+
         for (const nameElement of document.querySelectorAll<HTMLElement>(SURFACE_NAME_SELECTOR)) {
             const original = nameElement.dataset.jadgesSurfaceOriginalName || nameElement.textContent?.trim();
             if (!original) continue;
@@ -290,6 +318,7 @@ function startGlobalCustomNameSync(): void {
 function stopGlobalCustomNameSync(): void {
     clearInterval(globalNameTimer);
     globalNameTimer = undefined;
+
     for (const span of document.querySelectorAll<HTMLElement>(DISPLAY_NAME_SELECTOR)) {
         const original = span.dataset.jadgesGlobalOriginalName;
         if (!original) continue;
@@ -297,12 +326,24 @@ function stopGlobalCustomNameSync(): void {
         span.setAttribute("data-username-with-effects", original);
         delete span.dataset.jadgesGlobalOriginalName;
     }
+
     for (const panelName of document.querySelectorAll<HTMLElement>(PANEL_USERNAME_SELECTOR)) {
         const original = panelName.dataset.jadgesPanelOriginalName;
         if (!original) continue;
         panelName.textContent = original;
         delete panelName.dataset.jadgesPanelOriginalName;
     }
+
+    for (const messageName of document.querySelectorAll<HTMLElement>(MESSAGE_USERNAME_SELECTOR)) {
+        const textNode = firstDirectTextNode(messageName);
+        const originalText = messageName.dataset.jadgesMessageOriginalText;
+        const originalDataText = messageName.dataset.jadgesMessageOriginalDataText;
+        if (textNode && originalText) textNode.nodeValue = `${originalText} `;
+        if (originalDataText) messageName.setAttribute("data-text", originalDataText);
+        delete messageName.dataset.jadgesMessageOriginalText;
+        delete messageName.dataset.jadgesMessageOriginalDataText;
+    }
+
     for (const nameElement of document.querySelectorAll<HTMLElement>(SURFACE_NAME_SELECTOR)) {
         const original = nameElement.dataset.jadgesSurfaceOriginalName;
         if (!original) continue;
