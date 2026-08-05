@@ -1,0 +1,238 @@
+name: Clean dashboard custom profile integration
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  clean:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply clean source integration
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          # 1. Put the button directly in the dashboard HTML.
+          website = Path('src/website.ts')
+          text = website.read_text()
+          dashboard_start = text.index('function dashboardPage')
+          dashboard_end = text.index('function errorPage', dashboard_start)
+          dashboard = text[dashboard_start:dashboard_end]
+
+          custom_link = '''        <a class="nav-link" href="#customprofile"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c.8-4.4 3.5-7 8-7s7.2 2.6 8 7"/><path d="M18 4v4M16 6h4"/></svg>Custom Profile</a>'''
+
+          if 'href="#customprofile"' not in dashboard:
+              appearance_pattern = r'(        <a class="nav-link" href="#appearance">[\s\S]*?</a>)'
+              dashboard, count = re.subn(appearance_pattern, r'\1\n' + custom_link, dashboard, count=1)
+              if count != 1:
+                  raise SystemExit('Could not locate Appearance sidebar item in dashboardPage')
+              text = text[:dashboard_start] + dashboard + text[dashboard_end:]
+              website.write_text(text)
+
+          # 2. Add the dashboard hash-tab logic directly to the normal dashboard JS.
+          js = Path('web/jadges.js')
+          script = js.read_text()
+          marker = '  render();\n})();\n'
+          if marker not in script:
+              marker = '  render();\n})();'
+
+          tab_code = r'''
+
+  const dashboardView = document.querySelector(".dashboard-wrap");
+  const sidebarNav = document.querySelector(".sidebar-nav");
+  const customProfileLink = sidebarNav?.querySelector('a[href="#customprofile"]');
+  let customProfileView;
+
+  function customProfileMarkup(profile = {}) {
+    const username = typeof profile.username === "string" ? profile.username : "";
+    const createdAt = typeof profile.createdAt === "string" ? profile.createdAt.slice(0, 10) : "";
+    const originalName = state.profile?.username || "your Discord username";
+    return `
+      <div class="page-heading custom-profile-heading">
+        <div><span class="custom-profile-eyebrow">Cosmetic identity</span><h1>Custom Profile</h1></div>
+        <p>Change how your name and account creation date appear in supported Jadges clients. Your real Discord account stays unchanged.</p>
+      </div>
+      <div class="custom-profile-grid">
+        <section class="panel custom-profile-editor">
+          <div class="panel-head"><div><h2>Profile details</h2><p>Leave a field blank to use the original Discord value.</p></div><div class="save-indicator" id="custom-profile-save"><span class="save-dot"></span><span>Ready</span></div></div>
+          <form id="custom-profile-form" class="custom-profile-form">
+            <label><span>Custom username</span><input name="username" maxlength="32" value="${username.replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll('<', '&lt;')}" placeholder="Enter a cosmetic name"><small>Used across profiles, messages, and sidebars.</small></label>
+            <label><span>Custom account creation date</span><input name="createdAt" type="date" min="1900-01-01" value="${createdAt}"><small>Displayed as the cosmetic Member Since date.</small></label>
+            <div class="custom-profile-note">Jadges keeps the original username and creation date visible underneath the cosmetic values.</div>
+            <div class="custom-profile-actions"><button class="primary-action" type="submit">Save changes</button><button class="secondary-action" id="custom-profile-clear" type="button">Clear custom profile</button></div>
+          </form>
+        </section>
+        <aside class="panel custom-profile-preview-panel">
+          <div class="panel-head"><div><h2>Live preview</h2><p>How the cosmetic identity is presented.</p></div></div>
+          <div class="custom-profile-preview-body">
+            <div class="custom-profile-card">
+              <div class="custom-profile-banner"></div>
+              <div class="custom-profile-card-content">
+                <div class="custom-profile-avatar">${(state.profile?.displayName || originalName).slice(0, 1).toUpperCase()}</div>
+                <div class="custom-profile-name" id="custom-profile-preview-name">${username || state.profile?.displayName || originalName}</div>
+                <div class="custom-profile-original">Originally, ${originalName}</div>
+                <div class="custom-profile-divider"></div>
+                <div class="custom-profile-label">Member Since</div>
+                <div class="custom-profile-date" id="custom-profile-preview-date">${createdAt || "Original Discord creation date"}</div>
+                <div class="custom-profile-original">Originally, your real account creation date</div>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>`;
+  }
+
+  function setCustomProfileStatus(text, error = false) {
+    const status = document.getElementById("custom-profile-save");
+    if (!status) return;
+    status.classList.toggle("error", error);
+    const label = status.querySelector("span:last-child");
+    if (label) label.textContent = text;
+  }
+
+  function bindCustomProfileForm() {
+    const form = document.getElementById("custom-profile-form");
+    if (!(form instanceof HTMLFormElement)) return;
+    const username = form.elements.namedItem("username");
+    const createdAt = form.elements.namedItem("createdAt");
+    const previewName = document.getElementById("custom-profile-preview-name");
+    const previewDate = document.getElementById("custom-profile-preview-date");
+    const originalName = state.profile?.displayName || state.profile?.username || "Your name";
+
+    const updatePreview = () => {
+      if (previewName && username instanceof HTMLInputElement) previewName.textContent = username.value.trim() || originalName;
+      if (previewDate && createdAt instanceof HTMLInputElement) previewDate.textContent = createdAt.value || "Original Discord creation date";
+    };
+    username?.addEventListener("input", updatePreview);
+    createdAt?.addEventListener("input", updatePreview);
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      setCustomProfileStatus("Saving…");
+      const response = await fetch("/api/custom-profile", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          username: username instanceof HTMLInputElement ? username.value : "",
+          createdAt: createdAt instanceof HTMLInputElement ? createdAt.value : "",
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      setCustomProfileStatus(response.ok ? "Saved" : (result.error || "Could not save"), !response.ok);
+    });
+
+    document.getElementById("custom-profile-clear")?.addEventListener("click", async () => {
+      if (username instanceof HTMLInputElement) username.value = "";
+      if (createdAt instanceof HTMLInputElement) createdAt.value = "";
+      updatePreview();
+      setCustomProfileStatus("Clearing…");
+      const response = await fetch("/api/custom-profile", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ username: "", createdAt: "" }),
+      });
+      setCustomProfileStatus(response.ok ? "Cleared" : "Could not clear", !response.ok);
+    });
+  }
+
+  async function ensureCustomProfileView() {
+    if (customProfileView) return customProfileView;
+    customProfileView = document.createElement("div");
+    customProfileView.className = "dashboard-wrap custom-profile-view";
+    customProfileView.hidden = true;
+    dashboardView?.after(customProfileView);
+    let profile = {};
+    try {
+      const response = await fetch(`/custom-profiles.json?t=${Date.now()}`, { cache: "no-store", credentials: "same-origin" });
+      if (response.ok) profile = (await response.json())?.[state.profile?.id] || {};
+    } catch {}
+    customProfileView.innerHTML = customProfileMarkup(profile);
+    bindCustomProfileForm();
+    return customProfileView;
+  }
+
+  function setActiveSidebarLink(hash) {
+    sidebarNav?.querySelectorAll(".nav-link").forEach((link) => {
+      link.classList.toggle("active", link.getAttribute("href") === hash);
+    });
+  }
+
+  async function routeDashboardHash() {
+    const hash = window.location.hash || "#dashboard";
+    if (hash === "#customprofile") {
+      const view = await ensureCustomProfileView();
+      if (dashboardView) dashboardView.hidden = true;
+      view.hidden = false;
+      setActiveSidebarLink("#customprofile");
+      window.scrollTo({ top: 0, behavior: "instant" });
+      return;
+    }
+
+    if (dashboardView) dashboardView.hidden = false;
+    if (customProfileView) customProfileView.hidden = true;
+    setActiveSidebarLink(hash === "#badges" || hash === "#appearance" ? hash : "#dashboard");
+    if (hash === "#badges" || hash === "#appearance") {
+      requestAnimationFrame(() => document.querySelector(hash)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    }
+  }
+
+  customProfileLink?.addEventListener("click", () => {
+    if (window.location.hash === "#customprofile") void routeDashboardHash();
+  });
+  window.addEventListener("hashchange", () => void routeDashboardHash());
+  void routeDashboardHash();
+'''
+
+          if 'function customProfileMarkup(' not in script:
+              if marker not in script:
+                  raise SystemExit('Could not locate final dashboard render marker')
+              script = script.replace(marker, tab_code + '\n  render();\n})();\n', 1)
+              js.write_text(script)
+
+          # 3. Add clean styles to the normal stylesheet.
+          css = Path('web/jadges.css')
+          styles = css.read_text()
+          custom_css = r'''
+
+/* Custom Profile dashboard tab */
+.custom-profile-heading{display:grid;gap:9px}.custom-profile-eyebrow{display:block;color:#8e7cff;font-size:12px;font-weight:850;letter-spacing:.13em;text-transform:uppercase;margin-bottom:8px}.custom-profile-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(300px,.85fr);gap:24px;align-items:start}.custom-profile-editor{padding:0}.custom-profile-form{padding:4px 24px 26px}.custom-profile-form label{display:block;margin-top:20px}.custom-profile-form label>span{display:block;margin-bottom:8px;font-weight:800}.custom-profile-form label>small{display:block;margin-top:7px;color:#748198}.custom-profile-form input{width:100%;height:48px;padding:0 14px;border:1px solid #303b52;border-radius:11px;background:#080e19;color:#fff;font:inherit;outline:none}.custom-profile-form input:focus{border-color:#7c5cff;box-shadow:0 0 0 3px rgba(124,92,255,.15)}.custom-profile-note{margin-top:20px;padding:14px;border:1px solid #29354d;border-radius:12px;background:#0a1221;color:#aeb8ca}.custom-profile-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:22px}.primary-action,.secondary-action{min-height:44px;padding:0 17px;border-radius:11px;font:inherit;font-weight:800;cursor:pointer}.primary-action{border:0;background:linear-gradient(135deg,#7657ff,#5f7cff);color:#fff}.secondary-action{border:1px solid #303b52;background:transparent;color:#cbd2df}.custom-profile-preview-panel{overflow:hidden}.custom-profile-preview-body{padding:26px}.custom-profile-card{overflow:hidden;border:1px solid #30333b;border-radius:16px;background:#16181d}.custom-profile-banner{height:100px;background:radial-gradient(circle at 18% 30%,rgba(154,119,255,.8),transparent 30%),linear-gradient(135deg,#322367,#19274f)}.custom-profile-card-content{padding:0 18px 22px}.custom-profile-avatar{width:76px;height:76px;margin-top:-38px;border:6px solid #16181d;border-radius:50%;display:grid;place-items:center;background:linear-gradient(135deg,#7657ff,#35446d);font-size:28px;font-weight:900}.custom-profile-name{margin-top:11px;font-size:22px;font-weight:900}.custom-profile-original{margin-top:2px;color:#929aa8;font-size:12px}.custom-profile-divider{height:1px;margin:17px 0;background:#33363d}.custom-profile-label{color:#b9bec8;font-size:11px;font-weight:850;text-transform:uppercase}.custom-profile-date{margin-top:5px}.custom-profile-view[hidden],.dashboard-wrap[hidden]{display:none!important}@media(max-width:900px){.custom-profile-grid{grid-template-columns:1fr}}
+'''
+          if '/* Custom Profile dashboard tab */' not in styles:
+              css.write_text(styles.rstrip() + custom_css + '\n')
+
+          # 4. Remove old response injection; keep only the update endpoint integration.
+          integration = Path('src/vencordUpdateDashboardIntegration.ts')
+          integration.write_text('''import http, { type RequestListener, type ServerResponse } from "node:http";\n\nconst UPDATE_VERSION = 47;\nlet installed = false;\n\nfunction sendManifest(response: ServerResponse): void {\n  const body = JSON.stringify({ version: UPDATE_VERSION });\n  response.writeHead(200, {\n    "content-type": "application/json; charset=utf-8",\n    "content-length": String(Buffer.byteLength(body)),\n    "cache-control": "no-store, no-cache, must-revalidate",\n    "access-control-allow-origin": "*",\n  });\n  response.end(body);\n}\n\nfunction wrap(listener: RequestListener): RequestListener {\n  return (request, response) => {\n    const url = new URL(request.url || "/", "https://jadges.onrender.com");\n    if (request.method === "GET" && url.pathname === "/vencord-update.json") {\n      sendManifest(response);\n      return;\n    }\n    listener(request, response);\n  };\n}\n\nexport function installVencordUpdateDashboardIntegration(): void {\n  if (installed) return;\n  installed = true;\n  const mutable = http as typeof http & { createServer: (...args: any[]) => http.Server };\n  const original = mutable.createServer.bind(http) as (...args: any[]) => http.Server;\n  mutable.createServer = ((...args: any[]): http.Server => {\n    const index = typeof args[0] === "function" ? 0 : typeof args[1] === "function" ? 1 : -1;\n    if (index !== -1) args[index] = wrap(args[index] as RequestListener);\n    return original(...args);\n  }) as typeof http.createServer;\n}\n''')
+
+          # 5. Remove every temporary trigger/migration file introduced during this work.
+          for path in Path('.').glob('__trigger*'):
+              path.unlink(missing_ok=True)
+          for path in [
+              Path('.github/workflows/publish-jadges-update.yml'),
+              Path('.github/workflows/apply-custom-profile-dashboard.yml'),
+              Path('.github/workflows/clean-dashboard-custom-profile.yml'),
+          ]:
+              path.unlink(missing_ok=True)
+          PY
+
+      - name: Commit clean source files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Cleanly integrate Custom Profile dashboard tab"
+          git push
