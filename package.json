@@ -5,10 +5,10 @@
   "description": "Discord custom badge bot and API with Render persistent-disk storage",
   "type": "module",
   "scripts": {
-    "dev": "node --experimental-strip-types --env-file=.env src/main.ts",
-    "build": "tsc",
+    "dev": "node scripts/replace-discord-invite.mjs && node --experimental-strip-types --env-file=.env src/main.ts",
+    "build": "node scripts/replace-discord-invite.mjs && tsc",
     "start": "node dist/main.js",
-    "check": "tsc --noEmit"
+    "check": "node scripts/replace-discord-invite.mjs && tsc --noEmit"
   },
   "engines": {
     "node": ">=22"
