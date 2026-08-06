@@ -22,6 +22,7 @@ import { startVisibilitySync, stopVisibilitySync } from "./visibilitySync";
 
 const BADGE_QUERY = 'img[class*="badge"], img.jadges-profile-badge-image';
 const CUSTOM_PROFILE_URL = "https://jadges.onrender.com/custom-profiles.json";
+const CUSTOM_PROFILE_CACHE_KEY = "jadges-approved-custom-profiles-v1";
 const DISPLAY_NAME_SELECTOR = 'span[data-username-with-effects]';
 const USER_TAG_SELECTOR = 'span[class*="userTagUsername_"]';
 const PANEL_USERNAME_SELECTOR = '[class*="panelSubtextContainer_"] [class*="hovered_"]';
@@ -53,8 +54,11 @@ let originalFetch: FetchFunction | undefined;
 let originalQuerySelectorAll: QuerySelectorAll | undefined;
 let fetchInstalled = false;
 let queryFilterInstalled = false;
-let globalNameTimer: ReturnType<typeof setInterval> | undefined;
+let profileRefreshTimer: ReturnType<typeof setInterval> | undefined;
+let globalNameObserver: MutationObserver | undefined;
+let globalNameApplyQueued = false;
 let syncingGlobalNames = false;
+let profiles: CustomProfiles = readCachedProfiles();
 
 function requestUrl(input: RequestInfo | URL): string {
     if (typeof input === "string") return input;
@@ -201,33 +205,64 @@ function installBadgeQueryFilter(): void {
     }) as QuerySelectorAll;
 }
 
-function matchingProfileId(originalName: string, profiles: CustomProfiles): string | undefined {
-    return Object.keys(profiles).find(userId => {
+function normalizeProfiles(value: unknown): CustomProfiles {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const result: CustomProfiles = {};
+    for (const [userId, raw] of Object.entries(value)) {
+        if (!/^\d{15,22}$/.test(userId) || !raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+        const profile = raw as Record<string, unknown>;
+        const username = typeof profile.username === "string" ? profile.username.trim() : undefined;
+        const createdAt = typeof profile.createdAt === "string" ? profile.createdAt : undefined;
+        if (username || createdAt) result[userId] = { username, createdAt };
+    }
+    return result;
+}
+
+function readCachedProfiles(): CustomProfiles {
+    try {
+        return normalizeProfiles(JSON.parse(localStorage.getItem(CUSTOM_PROFILE_CACHE_KEY) || "{}"));
+    } catch {
+        return {};
+    }
+}
+
+function cacheProfiles(value: CustomProfiles): void {
+    try {
+        localStorage.setItem(CUSTOM_PROFILE_CACHE_KEY, JSON.stringify(value));
+    } catch {
+        // Discord can disable storage in unusual environments. The live cache still works.
+    }
+}
+
+function matchingProfileId(originalName: string, currentProfiles: CustomProfiles): string | undefined {
+    const normalized = originalName.trim();
+    const alreadyCustom = Object.entries(currentProfiles).find(([, profile]) => profile.username?.trim() === normalized);
+    if (alreadyCustom) return alreadyCustom[0];
+
+    return Object.keys(currentProfiles).find(userId => {
         const user = UserStore.getUser(userId);
-        return user?.username === originalName || user?.globalName === originalName;
+        return user?.username === normalized || user?.globalName === normalized;
     });
 }
 
-function customNameFor(originalName: string, profiles: CustomProfiles): string | undefined {
-    const userId = matchingProfileId(originalName, profiles);
-    return userId ? profiles[userId]?.username?.trim() : undefined;
+function customNameFor(originalName: string, currentProfiles: CustomProfiles): string | undefined {
+    const userId = matchingProfileId(originalName, currentProfiles);
+    return userId ? currentProfiles[userId]?.username?.trim() : undefined;
 }
 
 function firstDirectTextNode(element: HTMLElement): Text | undefined {
     return [...element.childNodes].find((node): node is Text => node.nodeType === Node.TEXT_NODE);
 }
 
-async function syncAllUsernameEffects(): Promise<void> {
+function setText(element: HTMLElement, value: string): void {
+    if (element.textContent !== value) element.textContent = value;
+}
+
+function applyCachedCustomNames(): void {
     if (syncingGlobalNames) return;
     syncingGlobalNames = true;
     try {
-        const response = await fetch(`${CUSTOM_PROFILE_URL}?t=${Date.now()}`, {
-            cache: "no-store",
-            credentials: "omit"
-        });
-        if (!response.ok) return;
-        const profiles = await response.json() as CustomProfiles;
-        if (!profiles || typeof profiles !== "object" || Array.isArray(profiles)) return;
+        const currentProfiles = profiles;
 
         for (const span of document.querySelectorAll<HTMLElement>(DISPLAY_NAME_SELECTOR)) {
             const original = span.dataset.jadgesOriginalDisplayName
@@ -236,14 +271,16 @@ async function syncAllUsernameEffects(): Promise<void> {
                 || span.textContent?.trim();
             if (!original) continue;
 
-            const customName = customNameFor(original, profiles);
+            const customName = customNameFor(original, currentProfiles);
             if (!customName) continue;
 
             if (!span.dataset.jadgesOriginalDisplayName && !span.dataset.jadgesGlobalOriginalName) {
                 span.dataset.jadgesGlobalOriginalName = original;
             }
-            span.textContent = customName;
-            span.setAttribute("data-username-with-effects", customName);
+            setText(span, customName);
+            if (span.getAttribute("data-username-with-effects") !== customName) {
+                span.setAttribute("data-username-with-effects", customName);
+            }
 
             const scope = span.closest<HTMLElement>('[class*="userProfile"],[class*="profilePopout"],[class*="profileModal"],[role="dialog"],[class*="biteSize"],[class*="fullSize"]');
             if (scope) {
@@ -251,7 +288,7 @@ async function syncAllUsernameEffects(): Promise<void> {
                     if (!userTag.dataset.jadgesOriginalUserTag) {
                         userTag.dataset.jadgesOriginalUserTag = userTag.textContent?.trim() || original;
                     }
-                    userTag.textContent = customName;
+                    setText(userTag, customName);
                 }
             }
         }
@@ -259,12 +296,10 @@ async function syncAllUsernameEffects(): Promise<void> {
         for (const panelName of document.querySelectorAll<HTMLElement>(PANEL_USERNAME_SELECTOR)) {
             const original = panelName.dataset.jadgesPanelOriginalName || panelName.textContent?.trim();
             if (!original) continue;
-            const customName = customNameFor(original, profiles);
+            const customName = customNameFor(original, currentProfiles);
             if (!customName) continue;
-            if (!panelName.dataset.jadgesPanelOriginalName) {
-                panelName.dataset.jadgesPanelOriginalName = original;
-            }
-            panelName.textContent = customName;
+            if (!panelName.dataset.jadgesPanelOriginalName) panelName.dataset.jadgesPanelOriginalName = original;
+            setText(panelName, customName);
         }
 
         for (const messageName of document.querySelectorAll<HTMLElement>(MESSAGE_USERNAME_SELECTOR)) {
@@ -278,7 +313,7 @@ async function syncAllUsernameEffects(): Promise<void> {
             const identity = originalDataText || originalText;
             if (!identity || !textNode) continue;
 
-            const customName = customNameFor(identity, profiles);
+            const customName = customNameFor(identity, currentProfiles);
             if (!customName) continue;
 
             if (!messageName.dataset.jadgesMessageOriginalText && originalText) {
@@ -288,48 +323,92 @@ async function syncAllUsernameEffects(): Promise<void> {
                 messageName.dataset.jadgesMessageOriginalDataText = originalDataText;
             }
 
-            textNode.nodeValue = `${customName} `;
-            messageName.setAttribute("data-text", customName);
+            const customText = `${customName} `;
+            if (textNode.nodeValue !== customText) textNode.nodeValue = customText;
+            if (messageName.getAttribute("data-text") !== customName) messageName.setAttribute("data-text", customName);
 
             for (const suffix of messageName.querySelectorAll<HTMLElement>('[class*="vc-smyn-suffix"]')) {
                 if (!suffix.dataset.jadgesMessageOriginalSuffix) {
                     suffix.dataset.jadgesMessageOriginalSuffix = suffix.textContent?.trim() || identity;
                 }
-                suffix.textContent = customName;
+                setText(suffix, customName);
             }
         }
 
         for (const nameElement of document.querySelectorAll<HTMLElement>(SURFACE_NAME_SELECTOR)) {
             const original = nameElement.dataset.jadgesSurfaceOriginalName || nameElement.textContent?.trim();
             if (!original) continue;
-            const customName = customNameFor(original, profiles);
+            const customName = customNameFor(original, currentProfiles);
             if (!customName) continue;
             if (!nameElement.dataset.jadgesSurfaceOriginalName) {
                 nameElement.dataset.jadgesSurfaceOriginalName = original;
             }
-            nameElement.textContent = customName;
+            setText(nameElement, customName);
         }
     } catch (error) {
-        console.warn("[JadgesBadges] Global custom-name sync failed:", error);
+        console.warn("[JadgesBadges] Instant custom-name render failed:", error);
     } finally {
         syncingGlobalNames = false;
     }
 }
 
+function scheduleCachedNameApply(): void {
+    if (globalNameApplyQueued) return;
+    globalNameApplyQueued = true;
+    queueMicrotask(() => {
+        globalNameApplyQueued = false;
+        applyCachedCustomNames();
+    });
+}
+
+async function refreshApprovedProfiles(): Promise<void> {
+    try {
+        const response = await fetch(`${CUSTOM_PROFILE_URL}?t=${Date.now()}`, {
+            cache: "no-store",
+            credentials: "omit"
+        });
+        if (!response.ok) return;
+        profiles = normalizeProfiles(await response.json());
+        cacheProfiles(profiles);
+        scheduleCachedNameApply();
+    } catch (error) {
+        console.warn("[JadgesBadges] Custom-profile refresh failed:", error);
+    }
+}
+
 function startGlobalCustomNameSync(): void {
-    void syncAllUsernameEffects();
-    clearInterval(globalNameTimer);
-    globalNameTimer = setInterval(() => void syncAllUsernameEffects(), 1_000);
+    profiles = readCachedProfiles();
+    scheduleCachedNameApply();
+
+    globalNameObserver?.disconnect();
+    globalNameObserver = new MutationObserver(() => scheduleCachedNameApply());
+    const root = document.documentElement || document.body;
+    if (root) {
+        globalNameObserver.observe(root, {
+            subtree: true,
+            childList: true,
+            characterData: true,
+            attributes: true,
+            attributeFilter: ["data-username-with-effects", "data-text"]
+        });
+    }
+
+    void refreshApprovedProfiles();
+    clearInterval(profileRefreshTimer);
+    profileRefreshTimer = setInterval(() => void refreshApprovedProfiles(), 1_000);
 }
 
 function stopGlobalCustomNameSync(): void {
-    clearInterval(globalNameTimer);
-    globalNameTimer = undefined;
+    globalNameObserver?.disconnect();
+    globalNameObserver = undefined;
+    clearInterval(profileRefreshTimer);
+    profileRefreshTimer = undefined;
+    globalNameApplyQueued = false;
 
     for (const span of document.querySelectorAll<HTMLElement>(DISPLAY_NAME_SELECTOR)) {
         const original = span.dataset.jadgesGlobalOriginalName;
         if (!original) continue;
-        span.textContent = original;
+        setText(span, original);
         span.setAttribute("data-username-with-effects", original);
         delete span.dataset.jadgesGlobalOriginalName;
     }
@@ -337,7 +416,7 @@ function stopGlobalCustomNameSync(): void {
     for (const panelName of document.querySelectorAll<HTMLElement>(PANEL_USERNAME_SELECTOR)) {
         const original = panelName.dataset.jadgesPanelOriginalName;
         if (!original) continue;
-        panelName.textContent = original;
+        setText(panelName, original);
         delete panelName.dataset.jadgesPanelOriginalName;
     }
 
@@ -350,7 +429,7 @@ function stopGlobalCustomNameSync(): void {
         for (const suffix of messageName.querySelectorAll<HTMLElement>('[class*="vc-smyn-suffix"]')) {
             const originalSuffix = suffix.dataset.jadgesMessageOriginalSuffix;
             if (!originalSuffix) continue;
-            suffix.textContent = originalSuffix;
+            setText(suffix, originalSuffix);
             delete suffix.dataset.jadgesMessageOriginalSuffix;
         }
         delete messageName.dataset.jadgesMessageOriginalText;
@@ -360,7 +439,7 @@ function stopGlobalCustomNameSync(): void {
     for (const nameElement of document.querySelectorAll<HTMLElement>(SURFACE_NAME_SELECTOR)) {
         const original = nameElement.dataset.jadgesSurfaceOriginalName;
         if (!original) continue;
-        nameElement.textContent = original;
+        setText(nameElement, original);
         delete nameElement.dataset.jadgesSurfaceOriginalName;
     }
 }
@@ -377,6 +456,7 @@ function restoreGuards(): void {
 async function startWithoutGlobalBadgeClick(): Promise<void> {
     installFetchGuard();
     installBadgeQueryFilter();
+    startGlobalCustomNameSync();
 
     const originalAdd = document.addEventListener.bind(document) as AddEventListener;
     let blockedCaptureClick = false;
@@ -392,7 +472,6 @@ async function startWithoutGlobalBadgeClick(): Promise<void> {
     try {
         await (basePlugin as any).start?.();
         startUpdateChecker();
-        startGlobalCustomNameSync();
         startThemeSync();
         startVisibilitySync();
         startProfileVisibilityReporter();
