@@ -518,6 +518,9 @@ export function installCustomProfileModeration(client: Client): void {
     if (!interaction.isButton()) return;
     const match = /^custom-profile:(approve|deny):([0-9a-f-]{36})$/i.exec(interaction.customId);
     if (!match) return;
-    void processReview(interaction, match[2], match[1] === "approve");
+    const action = match[1];
+    const requestId = match[2];
+    if (!action || !requestId) return;
+    void processReview(interaction, requestId, action === "approve");
   });
 }
