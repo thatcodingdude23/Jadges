@@ -33,13 +33,13 @@ const customProfileCommand = new SlashCommandBuilder()
       .setRequired(false),
   );
 
-function commandCollectionRoute(): string {
+function commandCollectionRoute(): `/${string}` {
   return config.guildId
     ? Routes.applicationGuildCommands(config.clientId, config.guildId)
     : Routes.applicationCommands(config.clientId);
 }
 
-function commandRoute(commandId: string): string {
+function commandRoute(commandId: string): `/${string}` {
   return config.guildId
     ? Routes.applicationGuildCommand(config.clientId, config.guildId, commandId)
     : Routes.applicationCommand(config.clientId, commandId);
