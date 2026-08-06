@@ -23,6 +23,8 @@ import { startVisibilitySync, stopVisibilitySync } from "./visibilitySync";
 const BADGE_QUERY = 'img[class*="badge"], img.jadges-profile-badge-image';
 const CUSTOM_PROFILE_URL = "https://jadges.onrender.com/custom-profiles.json";
 const CUSTOM_PROFILE_CACHE_KEY = "jadges-approved-custom-profiles-v1";
+const PLUGIN_BUILD_VERSION = 48;
+const LEGACY_UPDATER_VERSION = 47;
 const DISPLAY_NAME_SELECTOR = 'span[data-username-with-effects]';
 const USER_TAG_SELECTOR = 'span[class*="userTagUsername_"]';
 const PANEL_USERNAME_SELECTOR = '[class*="panelSubtextContainer_"] [class*="hovered_"]';
@@ -149,6 +151,16 @@ function stripNativeBadgesFromDirectory(data: unknown): unknown {
     return result;
 }
 
+function jsonResponse(response: Response, value: unknown): Response {
+    const headers = new Headers(response.headers);
+    headers.set("content-type", "application/json; charset=utf-8");
+    return new Response(JSON.stringify(value), {
+        status: response.status,
+        statusText: response.statusText,
+        headers
+    });
+}
+
 function installFetchGuard(): void {
     if (fetchInstalled) return;
     fetchInstalled = true;
@@ -171,17 +183,22 @@ function installFetchGuard(): void {
 
         const response = await originalFetch!(input, nextInit);
 
+        if (url.includes("/vencord-update.json") && response.ok) {
+            try {
+                const manifest = await response.clone().json() as { version?: unknown; };
+                if (manifest.version === PLUGIN_BUILD_VERSION) {
+                    return jsonResponse(response, { ...manifest, version: LEGACY_UPDATER_VERSION });
+                }
+            } catch {
+                // Keep the original update response if it is not valid JSON.
+            }
+        }
+
         if (!url.includes("/settings.json") || !response.ok) return response;
 
         try {
             const data = stripNativeBadgesFromDirectory(await response.clone().json());
-            const headers = new Headers(response.headers);
-            headers.set("content-type", "application/json; charset=utf-8");
-            return new Response(JSON.stringify(data), {
-                status: response.status,
-                statusText: response.statusText,
-                headers
-            });
+            return jsonResponse(response, data);
         } catch {
             return response;
         }
