@@ -41,10 +41,10 @@ function currentGuildId(): string | undefined {
 }
 
 function normalizePartnerGuildIds(value: unknown): Set<string> {
-    const source = Array.isArray(value)
+    const source: unknown[] = Array.isArray(value)
         ? value
         : value && typeof value === "object" && Array.isArray((value as PartnerGuildResponse).guildIds)
-            ? (value as PartnerGuildResponse).guildIds!
+            ? (value as PartnerGuildResponse).guildIds as unknown[]
             : [];
 
     return new Set(
@@ -88,25 +88,36 @@ function restorePatchedBadge(target: HTMLElement, state: PatchedGuildBadge): voi
 
     if (state.flowerFill === null) parts.flowerPath.removeAttribute("fill");
     else parts.flowerPath.setAttribute("fill", state.flowerFill);
-    parts.child.innerHTML = state.childHtml;
+    if (parts.child.innerHTML !== state.childHtml) parts.child.innerHTML = state.childHtml;
     patchedBadges.delete(target);
 }
 
 function patchCommunityBadge(target: HTMLElement, guildId: string): void {
-    if (patchedBadges.has(target)) return;
     const parts = badgeParts(target);
     if (!parts) return;
 
-    patchedBadges.set(target, {
-        guildId,
-        label: target.getAttribute("aria-label"),
-        flowerFill: parts.flowerPath.getAttribute("fill"),
-        childHtml: parts.child.innerHTML
-    });
+    let state = patchedBadges.get(target);
+    if (!state) {
+        state = {
+            guildId,
+            label: target.getAttribute("aria-label"),
+            flowerFill: parts.flowerPath.getAttribute("fill"),
+            childHtml: parts.child.innerHTML
+        };
+        patchedBadges.set(target, state);
+    }
 
-    target.setAttribute("aria-label", PARTNER_LABEL);
-    parts.flowerPath.setAttribute("fill", "var(--brand-500)");
-    parts.child.innerHTML = PARTNER_ICON;
+    const currentLabel = target.getAttribute("aria-label");
+    if (currentLabel !== PARTNER_LABEL && currentLabel !== state.label) {
+        patchedBadges.delete(target);
+        return;
+    }
+
+    if (currentLabel !== PARTNER_LABEL) target.setAttribute("aria-label", PARTNER_LABEL);
+    if (parts.flowerPath.getAttribute("fill") !== "var(--brand-500)") {
+        parts.flowerPath.setAttribute("fill", "var(--brand-500)");
+    }
+    if (parts.child.innerHTML !== PARTNER_ICON) parts.child.innerHTML = PARTNER_ICON;
 }
 
 function applyPartnerGuildBadge(): void {
@@ -125,7 +136,10 @@ function applyPartnerGuildBadge(): void {
 
             if (!isPartnerGuild || state.guildId !== guildId) {
                 restorePatchedBadge(target, state);
+                continue;
             }
+
+            patchCommunityBadge(target, guildId!);
         }
 
         if (!guildId || !isPartnerGuild) return;
