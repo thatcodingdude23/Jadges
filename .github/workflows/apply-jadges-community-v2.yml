@@ -1,5 +1,6 @@
 name: Apply Jadges badge directory v2
 
+# Second push intentionally triggers this one-time migration after the workflow exists.
 on:
   push:
     branches:
