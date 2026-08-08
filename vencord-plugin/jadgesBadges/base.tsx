@@ -567,10 +567,25 @@ function handleProfileBadgeClick(event: MouseEvent): void {
     openBadgeDirectory(userId);
 }
 
+async function waitForDocumentBody(): Promise<void> {
+    if (document.body) return;
+
+    await new Promise<void>(resolve => {
+        const observer = new MutationObserver(() => {
+            if (!document.body) return;
+            observer.disconnect();
+            resolve();
+        });
+        observer.observe(document, { childList: true, subtree: true });
+    });
+}
+
 function startProfileObserver(): void {
     profileObserver?.disconnect();
     profileObserver = new MutationObserver(() => syncProfileDom());
-    profileObserver.observe(document.body, { childList: true, subtree: true });
+    const body = document.body;
+    if (!body) return;
+    profileObserver.observe(body, { childList: true, subtree: true });
     syncProfileDom();
 }
 
@@ -711,10 +726,15 @@ export default definePlugin({
         }
     },
     async start() {
+        // Discord can restore enabled plugins before its profile DOM is ready.
+        // Hydrate Jadges first so BadgeAPI never caches an empty startup result.
+        await Promise.all([
+            refreshBadges(),
+            waitForDocumentBody()
+        ]);
         addProfileBadge(profileBadge);
         startProfileObserver();
         document.addEventListener("click", handleProfileBadgeClick, true);
-        await refreshBadges();
         clearInterval(refreshTimer);
         refreshTimer = setInterval(() => void refreshBadges(), REFRESH_INTERVAL);
     },

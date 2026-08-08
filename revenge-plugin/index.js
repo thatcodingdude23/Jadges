@@ -291,9 +291,11 @@
       .map(entry => entry.badge);
   }
 
-  function onLoad() {
+  async function onLoad() {
     installImageHooks();
-    void refreshBadges();
+    // Revenge and Kettu share this module. Hydrate before patching useBadges so
+    // the first profile render after app startup already has Jadges data.
+    await refreshBadges();
 
     try {
       const profileBadges = vendetta.metro.findByName("useBadges", false);
