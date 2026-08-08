@@ -11,6 +11,8 @@
   let refreshTimer;
   let guildStore;
   const unpatches = [];
+  const modifiedGuilds = new Map();
+  let warnedUnsupportedFeatures = false;
 
   function logger() {
     return vendetta?.logger ?? console;
@@ -46,6 +48,10 @@
   }
 
   function addPartnerFeature(features) {
+    // Discord has used multiple feature container types across Android builds.
+    // Preserve the exact container API instead of converting an unknown
+    // iterable into an Array. Converting it can make Discord later call a
+    // missing method such as features.has(), crashing the guild bar render.
     if (Array.isArray(features)) {
       return features.includes(PARTNER_FEATURE)
         ? features
@@ -59,37 +65,78 @@
       return next;
     }
 
-    if (features && typeof features[Symbol.iterator] === "function") {
+    // Immutable-style Set implementations usually expose has() + add(), with
+    // add() returning another value of the same type. This keeps that type.
+    if (
+      features &&
+      typeof features === "object" &&
+      typeof features.has === "function" &&
+      typeof features.add === "function"
+    ) {
       try {
-        const values = [...features];
-        return values.includes(PARTNER_FEATURE)
-          ? features
-          : [...values, PARTNER_FEATURE];
+        if (features.has(PARTNER_FEATURE)) return features;
+        const next = features.add(PARTNER_FEATURE);
+        if (
+          next &&
+          typeof next === "object" &&
+          typeof next.has === "function"
+        ) {
+          return next;
+        }
       } catch {}
     }
 
-    return [PARTNER_FEATURE];
+    return undefined;
+  }
+
+  function restoreGuild(guild) {
+    if (!guild || !modifiedGuilds.has(guild)) return guild;
+    const originalFeatures = modifiedGuilds.get(guild);
+    try {
+      guild.features = originalFeatures;
+    } catch {}
+    modifiedGuilds.delete(guild);
+    return guild;
   }
 
   function partnerGuild(guild) {
     if (!guild || typeof guild !== "object") return guild;
 
     const guildId = guildIdOf(guild);
-    if (!guildId || !partnerGuildIds.has(guildId)) return guild;
+    if (!guildId || !partnerGuildIds.has(guildId)) {
+      return restoreGuild(guild);
+    }
 
     const features = addPartnerFeature(guild.features);
     if (features === guild.features) return guild;
 
-    try {
-      const clone = Object.assign(
-        Object.create(Object.getPrototypeOf(guild)),
-        guild
-      );
-      clone.features = features;
-      return clone;
-    } catch {
-      return { ...guild, features };
+    if (features === undefined) {
+      if (!warnedUnsupportedFeatures) {
+        warnedUnsupportedFeatures = true;
+        logger().warn(
+          "[JadgesPartnerGuilds] Skipping partner styling because this Discord build uses an unsupported Guild.features container"
+        );
+      }
+      return guild;
     }
+
+    // Keep Discord's original Guild object identity and prototype intact.
+    // Several Android builds keep internal methods/state on this object that
+    // are lost by Object.assign/Object.create cloning.
+    try {
+      if (!modifiedGuilds.has(guild)) {
+        modifiedGuilds.set(guild, guild.features);
+      }
+      guild.features = features;
+    } catch (error) {
+      modifiedGuilds.delete(guild);
+      logger().warn(
+        "[JadgesPartnerGuilds] Could not safely apply partner styling to this guild",
+        error
+      );
+    }
+
+    return guild;
   }
 
   function partnerGuildMap(guilds) {
@@ -97,15 +144,12 @@
       return guilds;
     }
 
-    let changed = false;
-    const next = { ...guilds };
-    for (const [guildId, guild] of Object.entries(guilds)) {
-      const patched = partnerGuild(guild);
-      if (patched === guild) continue;
-      next[guildId] = patched;
-      changed = true;
+    // Do not clone Discord's guild map or its Guild values. Only safely update
+    // the existing feature field on partner guilds.
+    for (const guild of Object.values(guilds)) {
+      partnerGuild(guild);
     }
-    return changed ? next : guilds;
+    return guilds;
   }
 
   function notifyGuildStore() {
@@ -147,6 +191,11 @@
       return;
     }
 
+    if (typeof vendetta?.patcher?.after !== "function") {
+      logger().warn("[JadgesPartnerGuilds] Revenge patcher.after is unavailable on this build");
+      return;
+    }
+
     unpatches.push(
       vendetta.patcher.after("getGuild", guildStore, (_args, guild) =>
         partnerGuild(guild)
@@ -182,9 +231,15 @@
       try { unpatch?.(); } catch {}
     }
 
+    for (const [guild, originalFeatures] of modifiedGuilds) {
+      try { guild.features = originalFeatures; } catch {}
+    }
+    modifiedGuilds.clear();
+
     partnerGuildIds.clear();
     notifyGuildStore();
     guildStore = undefined;
+    warnedUnsupportedFeatures = false;
   }
 
   return { onLoad, onUnload };
