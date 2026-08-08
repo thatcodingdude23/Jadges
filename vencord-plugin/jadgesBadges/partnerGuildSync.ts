@@ -4,8 +4,11 @@ const DEFAULT_API_URL = "https://jadges.onrender.com/badges.json";
 const PARTNER_GUILD_REFRESH_INTERVAL = 5_000;
 const HEADER_COMMUNITY_BADGE_SELECTOR =
     '[class*="guildIconV2Container_"] [aria-label="Community Server"]';
-const HOVER_COMMUNITY_BADGE_SELECTOR =
-    '[class*="rowGuildName_"] [aria-label="Community Server"]';
+const HOVER_COMMUNITY_BADGE_SELECTOR = [
+    '[class*="guildTooltipWrapper_"] [aria-label="Community Server"]',
+    '[class*="rowGuildName_"] [aria-label="Community Server"]',
+    '[role="tooltip"] [aria-label="Community Server"]'
+].join(", ");
 const GUILD_NAV_ITEM_SELECTOR = '[data-list-item-id^="guildsnav___"]';
 const PARTNER_LABEL = "Discord Partner";
 const DISCORD_ID = /^\d{15,22}$/;
@@ -28,6 +31,7 @@ let refreshTimer: ReturnType<typeof setInterval> | undefined;
 let observer: MutationObserver | undefined;
 let applying = false;
 let applyQueued = false;
+let hoveredGuildId: string | undefined;
 const patchedBadges = new Map<HTMLElement, PatchedGuildBadge>();
 
 function normalizeApiUrl(value: unknown): string {
@@ -44,19 +48,51 @@ function currentGuildId(): string | undefined {
     return /^\/channels\/(\d{15,22})(?:\/|$)/.exec(location.pathname)?.[1];
 }
 
-function guildIdFromHoverTooltip(target: HTMLElement): string | undefined {
-    const listItem = target.closest<HTMLElement>('[class*="listItem_"]');
-    const guildItem = listItem?.querySelector<HTMLElement>(GUILD_NAV_ITEM_SELECTOR);
+function guildIdFromNavItem(element: Element | null | undefined): string | undefined {
+    const guildItem = element?.closest<HTMLElement>(GUILD_NAV_ITEM_SELECTOR);
     const listItemId = guildItem?.getAttribute("data-list-item-id") || "";
     return GUILD_NAV_ID.exec(listItemId)?.[1];
 }
 
-function guildIdForBadge(target: HTMLElement): string | undefined {
-    const hoverGuildId = guildIdFromHoverTooltip(target);
-    if (hoverGuildId) return hoverGuildId;
+function currentlyHoveredGuildId(): string | undefined {
+    const hovered = document.querySelector<HTMLElement>(`${GUILD_NAV_ITEM_SELECTOR}:hover`);
+    const listItemId = hovered?.getAttribute("data-list-item-id") || "";
+    return GUILD_NAV_ID.exec(listItemId)?.[1];
+}
 
+function rememberHoveredGuild(event: PointerEvent): void {
+    const target = event.target instanceof Element ? event.target : undefined;
+    const guildId = guildIdFromNavItem(target);
+    if (!guildId) return;
+    hoveredGuildId = guildId;
+    scheduleApply();
+}
+
+function guildIdFromHoverTooltip(target: HTMLElement): string | undefined {
+    const listItem = target.closest<HTMLElement>('[class*="listItem_"]');
+    const guildItem = listItem?.querySelector<HTMLElement>(GUILD_NAV_ITEM_SELECTOR);
+    const listItemId = guildItem?.getAttribute("data-list-item-id") || "";
+    const embeddedGuildId = GUILD_NAV_ID.exec(listItemId)?.[1];
+    if (embeddedGuildId) return embeddedGuildId;
+
+    return currentlyHoveredGuildId() || hoveredGuildId;
+}
+
+function isGuildHoverBadge(target: HTMLElement): boolean {
+    return Boolean(
+        target.closest('[class*="guildTooltipWrapper_"]')
+        || target.closest('[class*="rowGuildName_"]')
+        || target.closest('[role="tooltip"]')
+    );
+}
+
+function guildIdForBadge(target: HTMLElement): string | undefined {
     if (target.closest('[class*="guildIconV2Container_"]')) {
         return currentGuildId();
+    }
+
+    if (isGuildHoverBadge(target)) {
+        return guildIdFromHoverTooltip(target);
     }
 
     return undefined;
@@ -202,6 +238,7 @@ async function refreshPartnerGuilds(): Promise<void> {
 export function startPartnerGuildSync(): void {
     clearInterval(refreshTimer);
     observer?.disconnect();
+    document.removeEventListener("pointerover", rememberHoveredGuild, true);
 
     observer = new MutationObserver(() => scheduleApply());
     observer.observe(document.body, {
@@ -210,6 +247,7 @@ export function startPartnerGuildSync(): void {
         attributes: true,
         attributeFilter: ["aria-label", "data-list-item-id"]
     });
+    document.addEventListener("pointerover", rememberHoveredGuild, true);
 
     void refreshPartnerGuilds();
     scheduleApply();
@@ -224,7 +262,9 @@ export function stopPartnerGuildSync(): void {
     refreshTimer = undefined;
     observer?.disconnect();
     observer = undefined;
+    document.removeEventListener("pointerover", rememberHoveredGuild, true);
     partnerGuildIds.clear();
+    hoveredGuildId = undefined;
     applyQueued = false;
 
     for (const [target, state] of [...patchedBadges]) {
