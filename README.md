@@ -15,6 +15,11 @@ Only users with the Jadges plugin installed can see Jadges customizations.
 ## Features
 
 - Custom badge images and names
+- Discord-style badge directory with rarity details and creator links
+- Common, Uncommon, Rare, Epic, Legendary, plus staff-only special rarities
+- Animated badge playback modes: always, hover-only, or off
+- Global badge stats and search, creator profiles, and preset likes/favorites
+- Named Jadges profile theme presets
 - Bronze, Silver, Gold, Platinum, Diamond, Emerald, Ruby, and Opal Nitro presets
 - Native Nitro and server-boosting badge removal mode
 - Automatic Jaycord Staff badge

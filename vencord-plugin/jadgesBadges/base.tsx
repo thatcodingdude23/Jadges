@@ -30,6 +30,8 @@ type NitroKey =
     | "remove";
 
 type BadgeSide = "left" | "right";
+type BadgeRarity = "common" | "uncommon" | "rare" | "epic" | "legendary" | "exclusive" | "limited" | "staff" | "event" | "quest";
+type BadgeAnimationMode = "always" | "hover" | "off";
 
 interface NitroPreset {
     key: NitroKey;
@@ -59,12 +61,18 @@ interface JadgesBadge {
     metadata?: boolean;
     order?: string[];
     nativeBadges?: PublicNativeBadge[];
+    rarity?: BadgeRarity;
+    creatorId?: string;
+    animated?: boolean;
+    staticBadge?: string;
+    animationMode?: BadgeAnimationMode;
 }
 
 interface JadgesSettings {
     side: BadgeSide;
     order: string[];
     nativeBadges: PublicNativeBadge[];
+    animationMode: BadgeAnimationMode;
 }
 
 type JadgesResponse = Record<string, JadgesBadge[]>;
@@ -72,6 +80,7 @@ type BadgeSettingsResponse = Record<string, {
     side?: BadgeSide;
     order?: string[];
     nativeBadges?: PublicNativeBadge[];
+    animationMode?: BadgeAnimationMode;
 }>;
 
 type NativeDiscordBadge = ProfileBadge & {
@@ -87,6 +96,10 @@ interface DirectoryEntry {
     subtitle: string;
     description: string;
     nitro?: NitroPreset;
+    rarity: BadgeRarity;
+    creatorId?: string;
+    animated?: boolean;
+    staticImage?: string;
 }
 
 interface NativeControl {
@@ -156,6 +169,7 @@ function getSettings(userId: string): JadgesSettings {
         order: Array.isArray(stored?.order)
             ? stored.order.filter((value): value is string => typeof value === "string")
             : [],
+        animationMode: stored?.animationMode === "hover" || stored?.animationMode === "off" ? stored.animationMode : "always",
         nativeBadges: Array.isArray(stored?.nativeBadges)
             ? stored.nativeBadges.filter(badge =>
                 badge
@@ -195,7 +209,8 @@ function buildDirectoryEntries(userId: string): DirectoryEntry[] {
                 detailImage: badge.nitro.hoverImage || badge.nitro.profileIcon,
                 subtitle: `Unlocked on ${formatDate(badge.nitro.subscriberSince, true)}`,
                 description: "A Nitro appearance equipped through Jadges.",
-                nitro: badge.nitro
+                nitro: badge.nitro,
+                rarity: "rare"
             });
             return;
         }
@@ -210,7 +225,11 @@ function buildDirectoryEntries(userId: string): DirectoryEntry[] {
             subtitle: badge.createdAt
                 ? `Unlocked on ${formatDate(badge.createdAt, true)}`
                 : "Approved through Jadges",
-            description: `A profile badge displayed through Jadges. Other Jadges users can also see “${title}”.`
+            description: badge.rarity === "quest" ? "Unlocked by completing a Quest." : `A profile badge displayed through Jadges. Other Jadges users can also see “${title}”.`,
+            rarity: badge.rarity || "common",
+            creatorId: badge.creatorId,
+            animated: badge.animated === true,
+            staticImage: badge.staticBadge
         });
     });
 
@@ -221,64 +240,104 @@ function buildDirectoryEntries(userId: string): DirectoryEntry[] {
             icon: badge.image,
             detailImage: badge.image,
             subtitle: "Native Discord badge",
-            description: "A native Discord badge whose position is customized locally by the Jadges plugin."
+            description: "A native Discord badge whose position is customized locally by the Jadges plugin.",
+            rarity: "common"
         });
     });
 
     return entries;
 }
 
+function rarityLabel(value: BadgeRarity): string {
+    return value[0]!.toUpperCase() + value.slice(1);
+}
+
+function directoryImage(entry: DirectoryEntry, userId: string): string {
+    const mode = getSettings(userId).animationMode;
+    if (entry.animated && mode !== "always" && entry.staticImage) return entry.staticImage;
+    return entry.detailImage;
+}
+
 function BadgeDirectoryModal({ userId, modalProps }: { userId: string; modalProps: any; }) {
     const entries = buildDirectoryEntries(userId);
     const [selectedId, setSelectedId] = React.useState(entries[0]?.id);
+    const [stats, setStats] = React.useState<{ approvedBadges?: number; users?: number; }>();
     const selected = entries.find(entry => entry.id === selectedId) || entries[0];
 
-    return (
-        <ModalRoot {...modalProps} size={ModalSize.LARGE} aria-label="Badge Directory">
-            <ModalHeader className="jadges-directory-header">
-                <div>
-                    <h1 className="jadges-directory-heading">Your badges</h1>
-                    <div className="jadges-directory-subheading">
-                        Browse Jadges and detected Discord profile badges.
-                    </div>
-                </div>
-                <button className="jadges-directory-close" aria-label="Close" onClick={modalProps.onClose}>×</button>
-            </ModalHeader>
+    React.useEffect(() => {
+        let active = true;
+        void fetch(`${apiRoot()}/api/badges/stats`, { cache: "no-store", credentials: "omit" })
+            .then(response => response.ok ? response.json() : undefined)
+            .then(value => { if (active && value) setStats(value); })
+            .catch(() => undefined);
+        return () => { active = false; };
+    }, []);
 
-            <ModalContent className="jadges-directory-content">
+    return (
+        <ModalRoot {...modalProps} size={ModalSize.LARGE} aria-label="Badge Directory" className="jadges-directory-modal-root">
+            <ModalContent className="jadges-directory-content jadges-directory-v2">
                 {entries.length === 0 || !selected ? (
                     <div className="jadges-directory-empty">No visible badges were found for this user.</div>
                 ) : (
                     <div className="jadges-directory-layout">
                         <section className="jadges-directory-list">
-                            <div className="jadges-directory-grid" role="tablist" aria-label="Your badges">
-                                {entries.map(entry => (
-                                    <button
-                                        key={entry.id}
-                                        role="tab"
-                                        aria-selected={selected.id === entry.id}
-                                        aria-label={entry.title}
-                                        className={`jadges-directory-slot${selected.id === entry.id ? " jadges-directory-slot-selected" : ""}`}
-                                        onClick={() => setSelectedId(entry.id)}
-                                    >
-                                        <img src={entry.icon} alt="" aria-hidden="true" />
-                                    </button>
-                                ))}
+                            <header className="jadges-directory-header-v2">
+                                <h1>Your badges</h1>
+                                <p>Browse your badges and discover new ones you can unlock.</p>
+                            </header>
+                            <div className="jadges-directory-scroll">
+                                <div className="jadges-directory-grid" role="tablist" aria-label="Your badges">
+                                    {entries.map(entry => (
+                                        <button
+                                            key={entry.id}
+                                            role="tab"
+                                            aria-selected={selected.id === entry.id}
+                                            aria-label={entry.title}
+                                            className={`jadges-directory-slot${selected.id === entry.id ? " jadges-directory-slot-selected" : ""}`}
+                                            onClick={() => setSelectedId(entry.id)}
+                                        >
+                                            <img src={entry.icon} alt="" aria-hidden="true" />
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
+                            <footer className="jadges-directory-list-footer">
+                                <span>{stats?.approvedBadges ?? entries.length} badges</span>
+                                <span>{stats?.users ? `${stats.users} Jadges users` : "Jadges directory"}</span>
+                            </footer>
                         </section>
 
                         <section className="jadges-directory-detail" role="tabpanel">
-                            <img className="jadges-directory-graphic" src={selected.detailImage} alt="" aria-hidden="true" />
+                            <button className="jadges-directory-detail-close" aria-label="Close" onClick={modalProps.onClose}>×</button>
+                            <div className="jadges-directory-graphic-wrap">
+                                <img
+                                    className="jadges-directory-graphic"
+                                    src={directoryImage(selected, userId)}
+                                    alt=""
+                                    aria-hidden="true"
+                                    data-jadges-animation-mode={getSettings(userId).animationMode}
+                                    data-jadges-animated-src={selected.animated ? selected.detailImage : undefined}
+                                    data-jadges-static-src={selected.staticImage}
+                                />
+                            </div>
                             <div className="jadges-directory-identity">
                                 <h2>{selected.title}</h2>
-                                <div>{selected.subtitle}</div>
+                                <div>{selected.subtitle || "Unlocked"}</div>
                             </div>
-                            <div className="jadges-directory-card-row">
-                                <div className="jadges-directory-stat-card">
-                                    <strong>{selected.nitro ? "Rare" : "Badge"}</strong>
-                                    <span>{selected.nitro ? "Rarity" : "Badge type"}</span>
+                            <div className="jadges-directory-details-grid">
+                                <div className={`jadges-directory-stat-card rarity-${selected.rarity}`}>
+                                    <strong><span className="jadges-rarity-dot" />{rarityLabel(selected.rarity)}</strong>
+                                    <span>Rarity</span>
                                 </div>
-                                <div className="jadges-directory-description-card"><div>{selected.description}</div></div>
+                                <div className="jadges-directory-description-card">
+                                    <div>{selected.description}</div>
+                                    <div className="jadges-directory-actions">
+                                        {selected.creatorId && selected.rarity !== "quest" && selected.rarity !== "staff" && (
+                                            <button onClick={() => window.open(`${apiRoot()}/creators/${selected.creatorId}`, "_blank")}>Creator Profile</button>
+                                        )}
+                                        <button onClick={() => window.open(`${apiRoot()}/badge-search`, "_blank")}>Badge Search</button>
+                                    </div>
+                                </div>
                             </div>
 
                             {selected.nitro && (
@@ -553,6 +612,29 @@ function syncProfileDom(): void {
     }
 }
 
+function animationImageFromEvent(event: Event): HTMLImageElement | undefined {
+    const target = event.target;
+    if (!(target instanceof Element)) return undefined;
+    const image = target instanceof HTMLImageElement
+        ? target
+        : target.closest<HTMLImageElement>("img.jadges-profile-badge-image, img.jadges-directory-graphic");
+    return image || undefined;
+}
+
+function handleBadgeAnimationOver(event: Event): void {
+    const image = animationImageFromEvent(event);
+    if (!image || image.dataset.jadgesAnimationMode !== "hover") return;
+    const animated = image.dataset.jadgesAnimatedSrc;
+    if (animated && image.src !== animated) image.src = animated;
+}
+
+function handleBadgeAnimationOut(event: Event): void {
+    const image = animationImageFromEvent(event);
+    if (!image || image.dataset.jadgesAnimationMode !== "hover") return;
+    const still = image.dataset.jadgesStaticSrc;
+    if (still && image.src !== still) image.src = still;
+}
+
 function handleProfileBadgeClick(event: MouseEvent): void {
     const target = event.target;
     const userId = lastRenderedUserId;
@@ -643,15 +725,21 @@ function makeImageBadge(
     description: string,
     image: string,
     userId: string,
-    position: BadgePosition
+    position: BadgePosition,
+    staticImage?: string,
+    animated = false
 ): NativeDiscordBadge {
+    const animationMode = getSettings(userId).animationMode;
+    const displayedImage = animated && animationMode !== "always" && staticImage
+        ? staticImage
+        : image;
     return {
         id,
         key: id,
         description,
-        image,
+        image: displayedImage,
         rawImage: true,
-        iconSrc: image,
+        iconSrc: displayedImage,
         position,
         onClick: () => openBadgeDirectory(userId),
         props: {
@@ -659,6 +747,9 @@ function makeImageBadge(
             "aria-hidden": true,
             className: "jadges-profile-badge-image",
             "data-jadges-key": orderKey,
+            "data-jadges-animation-mode": animationMode,
+            "data-jadges-animated-src": animated ? image : undefined,
+            "data-jadges-static-src": staticImage,
             style: { width: "20px", height: "20px", objectFit: "contain" }
         } as any
     };
@@ -700,7 +791,9 @@ function getBadges({ userId }: BadgeUserArgs): ProfileBadge[] {
             badge.tooltip || badge.name || "Jadges Badge",
             badge.badge,
             userId,
-            position
+            position,
+            badge.staticBadge,
+            badge.animated === true
         ));
     });
 
@@ -735,6 +828,8 @@ export default definePlugin({
         addProfileBadge(profileBadge);
         startProfileObserver();
         document.addEventListener("click", handleProfileBadgeClick, true);
+        document.addEventListener("pointerover", handleBadgeAnimationOver, true);
+        document.addEventListener("pointerout", handleBadgeAnimationOut, true);
         clearInterval(refreshTimer);
         refreshTimer = setInterval(() => void refreshBadges(), REFRESH_INTERVAL);
     },
@@ -745,6 +840,8 @@ export default definePlugin({
         profileObserver?.disconnect();
         profileObserver = undefined;
         document.removeEventListener("click", handleProfileBadgeClick, true);
+        document.removeEventListener("pointerover", handleBadgeAnimationOver, true);
+        document.removeEventListener("pointerout", handleBadgeAnimationOut, true);
         restoreProfileDom();
         badgeData = {};
         settingsData = {};

@@ -270,6 +270,8 @@ export async function claimPreset(userId: string, preset: PresetRecord): Promise
       pending: false,
       createdAt: now,
       approvedAt: now,
+      rarity: "common",
+      creatorId: preset.uploaderId,
     };
     user.badges.push(badge);
     if (user.badgeOrder) user.badgeOrder.push(`custom:${badge.id}`);

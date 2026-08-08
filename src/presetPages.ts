@@ -190,7 +190,7 @@ export function detailPage(user: DiscordUser, preset: PresetRecord): string {
       <div class="preset-detail-copy">
         <div class="preset-detail-icon"><img src="${escapeHtml(presetImageUrl(preset))}" alt=""></div>
         <span class="preset-detail-label">Community preset</span><h1>${escapeHtml(preset.name)}</h1>
-        <p>Uploaded by <strong>@${escapeHtml(preset.uploaderUsername)}</strong>. Add a personal copy directly to your Jadges profile.</p>
+        <p>Uploaded by <a href="/creators/${encodeURIComponent(preset.uploaderId)}"><strong>@${escapeHtml(preset.uploaderUsername)}</strong></a>. Add a personal copy directly to your Jadges profile.</p>
         <button class="discord-button" id="get-preset-badge" type="button">Get Badge</button>
         <div class="preset-claim-message" id="preset-claim-message" role="status"></div>
       </div>

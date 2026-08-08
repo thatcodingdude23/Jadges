@@ -257,3 +257,259 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
+
+.jadges-directory-v2 {
+    padding: 0 !important;
+    overflow: hidden !important;
+}
+
+.jadges-directory-v2 .jadges-directory-layout {
+    display: grid;
+    grid-template-columns: minmax(350px, 1.08fr) minmax(330px, .92fr);
+    gap: 0;
+    min-height: 540px;
+    background: var(--background-base-lowest, var(--background-primary));
+}
+
+.jadges-directory-v2 .jadges-directory-list,
+.jadges-directory-v2 .jadges-directory-detail {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+.jadges-directory-v2 .jadges-directory-list {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    padding: 0;
+    border-right: 1px solid var(--border-subtle);
+}
+
+.jadges-directory-header-v2 {
+    padding: 28px 28px 18px;
+}
+
+.jadges-directory-header-v2 h1 {
+    margin: 0;
+    color: var(--text-strong);
+    font-size: 24px;
+    font-weight: 750;
+    line-height: 1.2;
+}
+
+.jadges-directory-header-v2 p {
+    margin: 7px 0 0;
+    color: var(--text-subtle);
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.jadges-directory-scroll {
+    flex: 1;
+    overflow: auto;
+    padding: 2px 28px 24px;
+}
+
+.jadges-directory-v2 .jadges-directory-grid {
+    grid-template-columns: repeat(auto-fill, minmax(66px, 1fr));
+    gap: 11px;
+}
+
+.jadges-directory-v2 .jadges-directory-slot {
+    min-height: 66px;
+    padding: 13px;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    background: var(--background-mod-subtle, rgba(255,255,255,.055));
+    transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.jadges-directory-v2 .jadges-directory-slot:hover {
+    background: var(--background-mod-strong, rgba(255,255,255,.11));
+    transform: translateY(-1px);
+}
+
+.jadges-directory-v2 .jadges-directory-slot-selected {
+    border-color: var(--border-strong, rgba(255,255,255,.22));
+    background: var(--background-mod-strong, rgba(255,255,255,.14));
+    box-shadow: inset 0 0 0 1px var(--brand-500, #5865f2);
+}
+
+.jadges-directory-v2 .jadges-directory-slot img {
+    width: 39px;
+    height: 39px;
+}
+
+.jadges-directory-list-footer {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 13px 28px;
+    border-top: 1px solid var(--border-subtle);
+    color: var(--text-subtle);
+    font-size: 12px;
+}
+
+.jadges-directory-v2 .jadges-directory-detail {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 28px 28px 30px;
+    text-align: left;
+    background: var(--background-secondary);
+}
+
+.jadges-directory-detail-close {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+    z-index: 2;
+    display: grid;
+    width: 32px;
+    height: 32px;
+    place-items: center;
+    border: 0;
+    border-radius: 8px;
+    background: var(--background-mod-subtle, rgba(255,255,255,.06));
+    color: var(--interactive-normal);
+    cursor: pointer;
+    font-size: 24px;
+    line-height: 1;
+}
+
+.jadges-directory-graphic-wrap {
+    display: grid;
+    min-height: 208px;
+    place-items: center;
+    margin: 20px 0 14px;
+}
+
+.jadges-directory-v2 .jadges-directory-graphic {
+    width: min(230px, 74%);
+    height: 190px;
+    margin: 0;
+    object-fit: contain;
+}
+
+.jadges-directory-v2 .jadges-directory-identity h2 {
+    margin: 0;
+    color: var(--text-strong);
+    font-size: 27px;
+    font-style: normal;
+    font-weight: 800;
+    text-transform: none;
+}
+
+.jadges-directory-v2 .jadges-directory-identity div {
+    margin-top: 5px;
+    font-size: 12px;
+}
+
+.jadges-directory-details-grid {
+    display: grid;
+    grid-template-columns: 125px minmax(0, 1fr);
+    gap: 10px;
+    margin-top: 24px;
+}
+
+.jadges-directory-v2 .jadges-directory-stat-card,
+.jadges-directory-v2 .jadges-directory-description-card {
+    min-height: 104px;
+    padding: 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    background: var(--background-primary);
+}
+
+.jadges-directory-v2 .jadges-directory-stat-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.jadges-directory-v2 .jadges-directory-stat-card strong {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+
+.jadges-rarity-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.jadges-directory-stat-card.rarity-common strong { color: #b7bdc8; }
+.jadges-directory-stat-card.rarity-uncommon strong { color: #57d68d; }
+.jadges-directory-stat-card.rarity-rare strong { color: #5ea0ff; }
+.jadges-directory-stat-card.rarity-epic strong { color: #b978ff; }
+.jadges-directory-stat-card.rarity-legendary strong { color: #ffbd4a; }
+.jadges-directory-stat-card.rarity-exclusive strong { color: #ff6ea9; }
+.jadges-directory-stat-card.rarity-limited strong { color: #ff8a5b; }
+.jadges-directory-stat-card.rarity-staff strong { color: #59e1dc; }
+.jadges-directory-stat-card.rarity-event strong { color: #f27cff; }
+.jadges-directory-stat-card.rarity-quest strong { color: #7bd7ff; }
+
+.jadges-directory-v2 .jadges-directory-description-card {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--text-default);
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.jadges-directory-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.jadges-directory-actions button {
+    min-height: 32px;
+    padding: 0 11px;
+    border: 0;
+    border-radius: 8px;
+    background: var(--button-secondary-background, var(--background-mod-strong));
+    color: var(--text-strong);
+    cursor: pointer;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.jadges-directory-v2 .jadges-directory-timeline-wrap {
+    margin-top: 18px;
+}
+
+@media (max-width: 760px) {
+    .jadges-directory-v2 .jadges-directory-layout {
+        grid-template-columns: 1fr;
+        min-height: 0;
+    }
+
+    .jadges-directory-v2 .jadges-directory-list {
+        border-right: 0;
+        border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .jadges-directory-v2 .jadges-directory-scroll {
+        max-height: 260px;
+    }
+
+    .jadges-directory-v2 .jadges-directory-detail {
+        min-height: 470px;
+    }
+
+    .jadges-directory-details-grid {
+        grid-template-columns: 1fr;
+    }
+}

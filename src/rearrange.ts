@@ -68,6 +68,7 @@ type ResolveSystemStaffBadge = (
 
 interface PublicBadgeSettings {
   side?: BadgeSide;
+  animationMode?: "always" | "hover" | "off";
   order: string[];
   nativeBadges: Array<{ key: string; name: string; image: string; }>;
 }
@@ -630,6 +631,7 @@ export async function handleRearrangeRequest(
     for (const [userId, user] of Object.entries(data.users)) {
       if (
         !user.badgeSide &&
+        !user.badgeAnimationMode &&
         !user.badgeOrder?.length &&
         !user.nativeBadges?.length
       ) {
@@ -638,6 +640,7 @@ export async function handleRearrangeRequest(
 
       result[userId] = {
         side: user.badgeSide,
+        animationMode: user.badgeAnimationMode || "always",
         order: user.badgeOrder ? [...user.badgeOrder] : [],
         nativeBadges: (user.nativeBadges || []).map((badge) => ({
           key: badge.key,

@@ -204,6 +204,16 @@ function activeNitroPreset(user: UserRecord): PublicNitroPreset | undefined {
   return legacyNitroPreset(user.badges);
 }
 
+function badgeIsAnimated(badge: BadgeRecord): boolean {
+  return badge.mimeType === "image/gif"
+    || badge.mimeType === "image/apng"
+    || badge.mimeType === "image/webp";
+}
+
+function staticBadgeUrl(filename: string, origin: string): string {
+  return `${origin.replace(/\/$/, "")}/badge-previews/${encodeURIComponent(filename)}.png`;
+}
+
 function toPublicBadge(
   badge: BadgeRecord,
   origin: string,
@@ -217,6 +227,10 @@ function toPublicBadge(
     pending: false,
     createdAt: badge.createdAt,
     side,
+    rarity: badge.rarity || "common",
+    creatorId: badge.creatorId || (badge.id.startsWith("quest:") ? undefined : badge.userId),
+    animated: badgeIsAnimated(badge),
+    staticBadge: badgeIsAnimated(badge) ? staticBadgeUrl(badge.filename, origin) : undefined,
   };
 }
 
@@ -245,6 +259,7 @@ function settingsRecord(user: UserRecord): PublicBadge {
     side: user.badgeSide,
     metadata: true,
     order: user.badgeOrder ? [...user.badgeOrder] : [],
+    animationMode: user.badgeAnimationMode || "always",
     nativeBadges: (user.nativeBadges || []).map((badge) => ({
       key: badge.key,
       name: badge.name,
@@ -293,6 +308,7 @@ function publicBadgesForUser(
       badge: isAdmin ? config.jaycordAdminBadgeUrl : config.jaycordStaffBadgeUrl,
       pending: false,
       side,
+      rarity: "staff",
     });
   }
 
@@ -355,6 +371,33 @@ async function serveNitroIcon(
   } catch (error) {
     console.error(`Could not render mobile Nitro icon ${preset}:`, error);
     sendJson(response, 502, { error: "Could not render Nitro icon" });
+  }
+}
+
+async function serveBadgePreview(
+  response: http.ServerResponse,
+  encodedFilename: string,
+): Promise<void> {
+  const filename = decodeURIComponent(encodedFilename).replace(/\.png$/i, "");
+  if (!allowedFile.test(filename)) {
+    sendJson(response, 404, { error: "Not found" });
+    return;
+  }
+  try {
+    const input = path.join(config.imagesDir, filename);
+    const png = await sharp(input, { animated: false, page: 0 })
+      .png()
+      .toBuffer();
+    response.writeHead(200, {
+      "content-type": "image/png",
+      "content-length": png.length,
+      "access-control-allow-origin": "*",
+      "cross-origin-resource-policy": "cross-origin",
+      "cache-control": "public, max-age=86400",
+    });
+    response.end(png);
+  } catch {
+    sendJson(response, 404, { error: "Not found" });
   }
 }
 
@@ -513,6 +556,14 @@ export function startServer(): http.Server {
         }
 
         await serveNitroIcon(response, preset);
+        return;
+      }
+
+      if (url.pathname.startsWith("/badge-previews/")) {
+        await serveBadgePreview(
+          response,
+          url.pathname.slice("/badge-previews/".length),
+        );
         return;
       }
 

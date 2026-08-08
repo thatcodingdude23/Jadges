@@ -115,6 +115,7 @@ function completionBadge(userId: string): BadgeRecord {
     pending: false,
     createdAt: now,
     approvedAt: now,
+    rarity: "quest",
   };
 }
 

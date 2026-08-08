@@ -23,6 +23,12 @@ import {
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import {
+  BADGE_RARITY_CHOICES,
+  isBadgeRarity,
+  isStaffBadgeRarity,
+  rarityLabel,
+} from "./badgeRarity.js";
+import {
   isNitroPreset,
   NITRO_PRESET_CHOICES,
   NITRO_PRESETS,
@@ -34,7 +40,10 @@ import {
   addPendingNitro,
   approveBadge,
   approveNitro,
+  getOrCreateUser,
   getUser,
+  mutateStore,
+  readStore,
   removeBadgeById,
   removeBadgeByName,
   removeBadgeForUserById,
@@ -42,6 +51,7 @@ import {
   removeNitroForUser,
   removePendingNitro,
   removePendingNitroForUser,
+  setBadgeAnimationMode,
   setBlocked,
   setStaffBadgeMode,
 } from "./store.js";
@@ -52,6 +62,7 @@ import {
   saveDiscordAttachment,
 } from "./storage.js";
 import type { BadgeRecord, NitroRecord } from "./types.js";
+import { listPresets } from "./presetStore.js";
 
 const UNLIMITED_BADGES_ROLE_ID = "1531693367639937075";
 const JAYCORD_STAFF_ROLE_ID = "1532572957778645082";
@@ -69,6 +80,13 @@ const badgeCommand = new SlashCommandBuilder()
           .setName("name")
           .setDescription("Badge tooltip/name")
           .setMaxLength(64)
+          .setRequired(true),
+      )
+      .addStringOption((option) =>
+        option
+          .setName("rarity")
+          .setDescription("Choose the badge rarity")
+          .setAutocomplete(true)
           .setRequired(true),
       )
       .addAttachmentOption((option) =>
@@ -146,6 +164,56 @@ const badgeCommand = new SlashCommandBuilder()
           .setRequired(false),
       ),
   )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("animation")
+      .setDescription("Choose how animated badges play")
+      .addStringOption((option) =>
+        option
+          .setName("mode")
+          .setDescription("Animated badge playback")
+          .addChoices(
+            { name: "Always animate", value: "always" },
+            { name: "Animate on hover", value: "hover" },
+            { name: "Animation off", value: "off" },
+          )
+          .setRequired(true),
+      ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("theme")
+      .setDescription("Apply a Jadges profile theme preset")
+      .addStringOption((option) =>
+        option
+          .setName("preset")
+          .setDescription("Profile theme")
+          .addChoices(
+            { name: "Default", value: "default" },
+            { name: "Dark", value: "dark" },
+            { name: "Purple", value: "purple" },
+            { name: "Gold", value: "gold" },
+            { name: "Glass", value: "glass" },
+            { name: "AMOLED", value: "amoled" },
+          )
+          .setRequired(true),
+      ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand.setName("stats").setDescription("View global Jadges badge statistics"),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("search")
+      .setDescription("Search the global Jadges badge directory")
+      .addStringOption((option) =>
+        option
+          .setName("query")
+          .setDescription("Badge name to search for")
+          .setMaxLength(64)
+          .setRequired(true),
+      ),
+  )
   .addSubcommandGroup((group) =>
     group
       .setName("nitro")
@@ -195,7 +263,7 @@ const botPresence = {
     {
       name: "Badges being made",
       type: ActivityType.Watching,
-      url: "https://discord.gg/jaycord",
+      url: "https://discord.gg/h63eG654F",
     },
   ],
 };
@@ -402,6 +470,7 @@ async function sendVerification(
     .setDescription(`Submitted by <@${badge.userId}>`)
     .addFields(
       { name: "Badge name", value: badge.name },
+      { name: "Rarity", value: rarityLabel(badge.rarity) },
       { name: "Badge ID", value: badge.id },
     )
     .setImage(publicImageUrl(badge.filename))
@@ -481,6 +550,15 @@ async function createBadge(
   }
 
   const name = cleanName(interaction.options.getString("name", true));
+  const selectedRarity = interaction.options.getString("rarity", true).toLowerCase();
+  if (!isBadgeRarity(selectedRarity)) {
+    await interaction.editReply("That rarity is not available. Choose one of the listed options.");
+    return;
+  }
+  if (isStaffBadgeRarity(selectedRarity) && !hasRole(interaction, JAYCORD_STAFF_ROLE_ID)) {
+    await interaction.editReply("That rarity is reserved for Jadges staff-awarded badges.");
+    return;
+  }
   const attachment = interaction.options.getAttachment("image", true) as Attachment;
   const contentType = attachment.contentType?.split(";")[0] || "";
 
@@ -521,6 +599,8 @@ async function createBadge(
       mimeType: stored.mimeType,
       pending: true,
       createdAt: new Date().toISOString(),
+      rarity: selectedRarity,
+      creatorId: userId,
     };
     await addPendingBadge(badge);
     await sendVerification(client, badge);
@@ -835,7 +915,7 @@ async function listBadges(
   const target = interaction.options.getUser("user") || interaction.user;
   const user = await getUser(target.id);
   const lines = user.badges.map(
-    (badge) => `• **${badge.name}**${badge.pending ? " — pending" : ""}`,
+    (badge) => `• **${badge.name}** — ${rarityLabel(badge.rarity)}${badge.pending ? " — pending" : ""}`,
   );
 
   if (user.nitro) {
@@ -861,6 +941,129 @@ async function listBadges(
     embeds: [embed],
     flags: MessageFlags.Ephemeral,
   });
+}
+
+interface StoredTheme {
+  enabled: boolean;
+  mode: "dark" | "light";
+  colors: string[];
+  angle: number;
+  intensity: number;
+  updatedAt: string;
+}
+
+const PROFILE_THEME_PRESETS: Record<string, Omit<StoredTheme, "updatedAt"> | undefined> = {
+  default: undefined,
+  dark: { enabled: true, mode: "dark", colors: ["#313338", "#1E1F22"], angle: 45, intensity: 28 },
+  purple: { enabled: true, mode: "dark", colors: ["#7C4DFF", "#B89CFF", "#5B8CFF"], angle: 135, intensity: 68 },
+  gold: { enabled: true, mode: "dark", colors: ["#E8B84A", "#8A6424", "#33250D"], angle: 120, intensity: 62 },
+  glass: { enabled: true, mode: "dark", colors: ["#8FD3FF", "#B7A1FF", "#D5F4FF"], angle: 145, intensity: 30 },
+  amoled: { enabled: true, mode: "dark", colors: ["#000000", "#090909", "#171717"], angle: 180, intensity: 88 },
+};
+
+async function setAnimationPreference(interaction: ChatInputCommandInteraction): Promise<void> {
+  const mode = interaction.options.getString("mode", true);
+  if (mode !== "always" && mode !== "hover" && mode !== "off") {
+    await interaction.reply({ content: "That animation mode is invalid.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  await setBadgeAnimationMode(interaction.user.id, mode);
+  await interaction.reply({
+    content: mode === "always"
+      ? "Animated badges will always play."
+      : mode === "hover"
+        ? "Animated badges will use a still frame until you hover them."
+        : "Animated badges will use a still frame.",
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+async function setProfileTheme(interaction: ChatInputCommandInteraction): Promise<void> {
+  const preset = interaction.options.getString("preset", true);
+  if (!Object.hasOwn(PROFILE_THEME_PRESETS, preset)) {
+    await interaction.reply({ content: "That profile theme is invalid.", flags: MessageFlags.Ephemeral });
+    return;
+  }
+  await mutateStore((data) => {
+    const user = getOrCreateUser(data, interaction.user.id) as typeof data.users[string] & { theme?: StoredTheme };
+    const theme = PROFILE_THEME_PRESETS[preset];
+    if (!theme) delete user.theme;
+    else user.theme = { ...theme, colors: [...theme.colors], updatedAt: new Date().toISOString() };
+  });
+  await interaction.reply({
+    content: preset === "default"
+      ? "Your Jadges profile theme was reset to default."
+      : `The **${preset[0]!.toUpperCase() + preset.slice(1)}** Jadges profile theme is now active.`,
+    flags: MessageFlags.Ephemeral,
+  });
+}
+
+async function badgeStats(interaction: ChatInputCommandInteraction): Promise<void> {
+  const [data, presets] = await Promise.all([readStore(), listPresets()]);
+  const users = Object.values(data.users);
+  const all = users.flatMap((user) => user.badges || []);
+  const approved = all.filter((badge) => !badge.pending);
+  const pending = all.filter((badge) => badge.pending);
+  const animated = approved.filter((badge) =>
+    badge.mimeType === "image/gif" || badge.mimeType === "image/apng" || badge.mimeType === "image/webp"
+  );
+  const rarityCounts = new Map<string, number>();
+  for (const badge of approved) {
+    const rarity = rarityLabel(badge.rarity);
+    rarityCounts.set(rarity, (rarityCounts.get(rarity) || 0) + 1);
+  }
+  const rarityLine = [...rarityCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, count]) => `${name}: ${count}`)
+    .join(" • ") || "No approved badges yet";
+  const embed = new EmbedBuilder()
+    .setTitle("Jadges Badge Stats")
+    .setDescription(rarityLine)
+    .addFields(
+      { name: "Users", value: String(users.length), inline: true },
+      { name: "Approved badges", value: String(approved.length), inline: true },
+      { name: "Pending", value: String(pending.length), inline: true },
+      { name: "Animated", value: String(animated.length), inline: true },
+      { name: "Community presets", value: String(presets.length), inline: true },
+      { name: "Preset claims", value: String(presets.reduce((sum, preset) => sum + preset.claims, 0)), inline: true },
+    )
+    .setColor(0x7c5cff);
+  await interaction.reply({ embeds: [embed], flags: MessageFlags.Ephemeral });
+}
+
+async function globalBadgeSearch(interaction: ChatInputCommandInteraction): Promise<void> {
+  const query = cleanName(interaction.options.getString("query", true)).toLowerCase();
+  const data = await readStore();
+  const matches: Array<{ name: string; rarity: string; creatorId?: string }> = [];
+  const seen = new Set<string>();
+  for (const [ownerId, user] of Object.entries(data.users)) {
+    for (const badge of user.badges || []) {
+      if (badge.pending || !badge.name.toLowerCase().includes(query)) continue;
+      const creatorId = badge.creatorId || (badge.id.startsWith("quest:") ? undefined : ownerId);
+      const key = `${creatorId || "system"}:${badge.name.toLowerCase()}:${badge.rarity || "common"}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      matches.push({ name: badge.name, rarity: rarityLabel(badge.rarity), creatorId });
+      if (matches.length >= 10) break;
+    }
+    if (matches.length >= 10) break;
+  }
+  const description = matches.length
+    ? matches.map((match) =>
+        `• **${match.name}** — ${match.rarity}${match.creatorId ? ` — [Creator](${config.publicUrl}/creators/${match.creatorId})` : ""}`
+      ).join("\n")
+    : "No approved Jadges badges matched that search.";
+  const embed = new EmbedBuilder()
+    .setTitle(`Badge search: ${interaction.options.getString("query", true)}`)
+    .setDescription(description)
+    .setColor(0x5865f2);
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setLabel("Open global search")
+      .setStyle(ButtonStyle.Link)
+      .setURL(`${config.publicUrl}/badge-search?q=${encodeURIComponent(interaction.options.getString("query", true))}`),
+  );
+  await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
 }
 
 async function setUserBlock(
@@ -894,6 +1097,17 @@ async function handleAutocomplete(
 
   const subcommand = interaction.options.getSubcommand(false);
   const focused = interaction.options.getFocused(true);
+  if (focused.name === "rarity" && subcommand === "create") {
+    const query = String(focused.value || "").toLowerCase();
+    const hasSpecialAccess = interaction.inCachedGuild()
+      && interaction.member.roles.cache.has(JAYCORD_STAFF_ROLE_ID);
+    const choices = BADGE_RARITY_CHOICES
+      .filter((choice) => hasSpecialAccess || !isStaffBadgeRarity(choice.value))
+      .filter((choice) => choice.name.toLowerCase().includes(query) || choice.value.includes(query))
+      .slice(0, 25);
+    await interaction.respond(choices);
+    return;
+  }
   if (focused.name !== "badge") {
     await interaction.respond([]);
     return;
@@ -985,6 +1199,18 @@ async function handleCommand(
       break;
     case "list":
       await listBadges(interaction);
+      break;
+    case "animation":
+      await setAnimationPreference(interaction);
+      break;
+    case "theme":
+      await setProfileTheme(interaction);
+      break;
+    case "stats":
+      await badgeStats(interaction);
+      break;
+    case "search":
+      await globalBadgeSearch(interaction);
       break;
     case "block":
       await setUserBlock(interaction, true);

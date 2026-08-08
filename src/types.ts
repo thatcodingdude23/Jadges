@@ -10,6 +10,18 @@ export type NitroPreset =
   | "remove";
 
 export type BadgeSide = "left" | "right";
+export type BadgeRarity =
+  | "common"
+  | "uncommon"
+  | "rare"
+  | "epic"
+  | "legendary"
+  | "exclusive"
+  | "limited"
+  | "staff"
+  | "event"
+  | "quest";
+export type BadgeAnimationMode = "always" | "hover" | "off";
 export type StaffBadgeMode = "default" | "admin";
 
 export interface NativeBadgeObservation {
@@ -29,6 +41,10 @@ export interface BadgeRecord {
   pending: boolean;
   createdAt: string;
   approvedAt?: string;
+  /** Badge-directory rarity. Existing records default to common. */
+  rarity?: BadgeRarity;
+  /** Original creator when a badge was claimed from a community preset. */
+  creatorId?: string;
   /** Legacy field kept so presets submitted before the separate command still work. */
   nitroPreset?: NitroPreset;
 }
@@ -53,6 +69,8 @@ export interface UserRecord {
    */
   badgeOrder?: string[];
   badgeSide?: BadgeSide;
+  /** Controls animated badge playback for supported Jadges clients. */
+  badgeAnimationMode?: BadgeAnimationMode;
   /** Native Discord badges last observed by an updated Jadges client. */
   nativeBadges?: NativeBadgeObservation[];
   /** Optional system staff badge selection. Missing means the default staff badge. */
@@ -92,6 +110,11 @@ export interface PublicBadge {
   pending: false;
   createdAt?: string;
   side?: BadgeSide;
+  rarity?: BadgeRarity;
+  creatorId?: string;
+  animated?: boolean;
+  /** First-frame PNG used when animation is off or hover-only. */
+  staticBadge?: string;
   nitro?: PublicNitroPreset;
   /** Settings-only record consumed by the Jadges clients. */
   metadata?: boolean;
@@ -99,4 +122,5 @@ export interface PublicBadge {
   order?: string[];
   /** Native Discord badges observed by a Jadges client. */
   nativeBadges?: PublicNativeBadge[];
+  animationMode?: BadgeAnimationMode;
 }

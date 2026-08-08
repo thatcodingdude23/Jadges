@@ -1,6 +1,8 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { config } from "./config.js";
+import { isBadgeRarity } from "./badgeRarity.js";
 import type {
+  BadgeAnimationMode,
   BadgeRecord,
   BadgeSide,
   NativeBadgeObservation,
@@ -25,6 +27,16 @@ async function ensureStore(): Promise<void> {
 function normalizeUser(user: UserRecord): void {
   user.blocked ??= false;
   user.badges ??= [];
+  for (const badge of user.badges) {
+    if (!isBadgeRarity(badge.rarity)) badge.rarity = "common";
+    if (!badge.creatorId && !badge.id.startsWith("quest:") && !badge.id.startsWith("preset-")) {
+      badge.creatorId = badge.userId;
+    }
+  }
+
+  if (user.badgeAnimationMode !== "always" && user.badgeAnimationMode !== "hover" && user.badgeAnimationMode !== "off") {
+    delete user.badgeAnimationMode;
+  }
 
   if (user.badgeOrder && !Array.isArray(user.badgeOrder)) {
     delete user.badgeOrder;
@@ -359,5 +371,15 @@ export async function setStaffBadgeMode(
 export async function setBlocked(userId: string, blocked: boolean): Promise<void> {
   await mutateStore((data) => {
     getOrCreateUser(data, userId).blocked = blocked;
+  });
+}
+
+export async function setBadgeAnimationMode(
+  userId: string,
+  mode: BadgeAnimationMode,
+): Promise<void> {
+  await mutateStore((data) => {
+    const user = getOrCreateUser(data, userId);
+    user.badgeAnimationMode = mode;
   });
 }
