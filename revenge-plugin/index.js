@@ -7,6 +7,7 @@
   const NATIVE_REPORT_INTERVAL = 60_000;
   const QUEST_BADGE_KEY = "custom:quest:completed-any";
   const QUEST_MOBILE_NAME = "Jadges Completed a Quest";
+  const DISCORD_ID = /^\d{15,22}$/;
 
   let badgeData = {};
   let settingsData = {};
@@ -24,6 +25,83 @@
       day: "2-digit",
       year: "2-digit"
     }).format(date);
+  }
+
+  let userStore;
+
+  function validDiscordId(value) {
+    return typeof value === "string" && DISCORD_ID.test(value)
+      ? value
+      : undefined;
+  }
+
+  function resolveUserId(value, depth = 0) {
+    const direct = validDiscordId(value);
+    if (direct) return direct;
+    if (!value || typeof value !== "object" || depth > 3) return undefined;
+
+    const explicit = validDiscordId(value.userId) || validDiscordId(value.user_id);
+    if (explicit) return explicit;
+
+    for (const key of ["user", "profile", "member", "account"]) {
+      const nested = resolveUserId(value[key], depth + 1);
+      if (nested) return nested;
+    }
+
+    return validDiscordId(value.id);
+  }
+
+  function getUserStore() {
+    if (userStore) return userStore;
+    try {
+      const found = vendetta.metro.findByProps("getCurrentUser", "getUser");
+      userStore = found?.default && typeof found.default.getCurrentUser === "function"
+        ? found.default
+        : found;
+    } catch {}
+    return userStore;
+  }
+
+  function currentUserId() {
+    try {
+      return validDiscordId(getUserStore()?.getCurrentUser?.()?.id);
+    } catch {
+      return undefined;
+    }
+  }
+
+  function resolveBadgeUserId(args) {
+    if (!Array.isArray(args)) return resolveUserId(args);
+
+    const first = resolveUserId(args[0]);
+    if (first) return first;
+
+    for (const arg of args.slice(1)) {
+      if (!arg || typeof arg !== "object") continue;
+      const explicit = validDiscordId(arg.userId)
+        || validDiscordId(arg.user_id)
+        || resolveUserId(arg.user);
+      if (explicit) return explicit;
+    }
+
+    // Some Revenge builds call the self-profile badge hook without an explicit user.
+    if (args.length === 0 || args[0] == null) return currentUserId();
+    return undefined;
+  }
+
+  function notifyBadgeUi() {
+    const candidates = [];
+    try { candidates.push(getUserStore()); } catch {}
+    try { candidates.push(vendetta.metro.findByProps("getUserProfile", "getGuildMemberProfile")); } catch {}
+
+    for (const found of candidates) {
+      const store = found?.default && typeof found.default.emitChange === "function"
+        ? found.default
+        : found;
+      try {
+        if (typeof store?.emitChange === "function") store.emitChange();
+      } catch {}
+    }
   }
 
   function getSettings(userId, jadges) {
@@ -293,22 +371,34 @@
 
   async function onLoad() {
     installImageHooks();
-    // Revenge and Kettu share this module. Hydrate before patching useBadges so
-    // the first profile render after app startup already has Jadges data.
-    await refreshBadges();
+
+    // Install the Discord hook immediately. Self-profile components can mount
+    // before the Jadges API request completes on slower mobile connections.
+    const initialRefresh = refreshBadges();
 
     try {
-      const profileBadges = vendetta.metro.findByName("useBadges", false);
+      let profileBadges = vendetta.metro.findByName("useBadges", false);
+      let badgeMethod = "default";
+
       if (!profileBadges || typeof profileBadges.default !== "function") {
+        const byProps = vendetta.metro.findByProps("useBadges");
+        if (byProps && typeof byProps.useBadges === "function") {
+          profileBadges = byProps;
+          badgeMethod = "useBadges";
+        }
+      }
+
+      if (!profileBadges || typeof profileBadges[badgeMethod] !== "function") {
         vendetta.logger.error("[JadgesBadges] Discord's useBadges module was not found");
+        await initialRefresh;
         return;
       }
 
       unpatch = vendetta.patcher.after(
-        "default",
+        badgeMethod,
         profileBadges,
-        ([user], originalBadges) => {
-          const userId = user?.userId ?? user?.id;
+        (args, originalBadges) => {
+          const userId = resolveBadgeUserId(args);
           if (!userId) return originalBadges;
 
           void reportNativeBadges(userId, originalBadges);
@@ -383,8 +473,13 @@
         }
       );
 
-      refreshTimer = setInterval(() => void refreshBadges(), REFRESH_INTERVAL);
-      vendetta.logger.log("[JadgesBadges] Enabled with mobile native and Jadges badge rearranging");
+      await initialRefresh;
+      notifyBadgeUi();
+      refreshTimer = setInterval(async () => {
+        await refreshBadges();
+        notifyBadgeUi();
+      }, REFRESH_INTERVAL);
+      vendetta.logger.log("[JadgesBadges] Enabled with mobile self-profile compatibility");
     } catch (error) {
       vendetta.logger.error("[JadgesBadges] Failed to start", error);
     }
