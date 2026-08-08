@@ -1,0 +1,86 @@
+name: Apply Jadges badge startup fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "__trigger_jadges_badge_startup_fix"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch startup initialization on desktop and mobile
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path_str: str, old: str, new: str) -> None:
+              path = Path(path_str)
+              text = path.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one match in {path_str}, found {count}")
+              path.write_text(text.replace(old, new, 1))
+
+          base = "vencord-plugin/jadgesBadges/base.tsx"
+          replace_once(
+              base,
+              '''function startProfileObserver(): void {\n    profileObserver?.disconnect();\n    profileObserver = new MutationObserver(() => syncProfileDom());\n    profileObserver.observe(document.body, { childList: true, subtree: true });\n    syncProfileDom();\n}\n''',
+              '''async function waitForDocumentBody(): Promise<void> {\n    if (document.body) return;\n\n    await new Promise<void>(resolve => {\n        const observer = new MutationObserver(() => {\n            if (!document.body) return;\n            observer.disconnect();\n            resolve();\n        });\n        observer.observe(document, { childList: true, subtree: true });\n    });\n}\n\nfunction startProfileObserver(): void {\n    profileObserver?.disconnect();\n    profileObserver = new MutationObserver(() => syncProfileDom());\n    const body = document.body;\n    if (!body) return;\n    profileObserver.observe(body, { childList: true, subtree: true });\n    syncProfileDom();\n}\n'''
+          )
+          replace_once(
+              base,
+              '''    async start() {\n        addProfileBadge(profileBadge);\n        startProfileObserver();\n        document.addEventListener("click", handleProfileBadgeClick, true);\n        await refreshBadges();\n        clearInterval(refreshTimer);\n        refreshTimer = setInterval(() => void refreshBadges(), REFRESH_INTERVAL);\n    },\n''',
+              '''    async start() {\n        // Discord can restore enabled plugins before its profile DOM is ready.\n        // Hydrate Jadges first so BadgeAPI never caches an empty startup result.\n        await Promise.all([\n            refreshBadges(),\n            waitForDocumentBody()\n        ]);\n        addProfileBadge(profileBadge);\n        startProfileObserver();\n        document.addEventListener("click", handleProfileBadgeClick, true);\n        clearInterval(refreshTimer);\n        refreshTimer = setInterval(() => void refreshBadges(), REFRESH_INTERVAL);\n    },\n'''
+          )
+
+          replace_once(
+              "revenge-plugin/index.js",
+              '''  function onLoad() {\n    installImageHooks();\n    void refreshBadges();\n\n    try {\n''',
+              '''  async function onLoad() {\n    installImageHooks();\n    // Revenge and Kettu share this module. Hydrate before patching useBadges so\n    // the first profile render after app startup already has Jadges data.\n    await refreshBadges();\n\n    try {\n'''
+          )
+
+          replace_once(
+              "vencord-plugin/jadgesBadges/updater.ts",
+              "const CURRENT_UPDATE_VERSION = 51;",
+              "const CURRENT_UPDATE_VERSION = 52;"
+          )
+          replace_once(
+              "src/vencordUpdateDashboardIntegration.ts",
+              "const UPDATE_VERSION = 51;",
+              "const UPDATE_VERSION = 52;"
+          )
+          replace_once(
+              "vencord-plugin/update.json",
+              '"version": 51',
+              '"version": 52'
+          )
+
+          Path("__trigger_jadges_badge_startup_fix").unlink(missing_ok=True)
+          Path(".github/workflows/apply-badge-startup-fix.yml").unlink(missing_ok=True)
+          PY
+
+      - name: Validate mobile JavaScript
+        run: node --check revenge-plugin/index.js
+
+      - name: Validate release version
+        run: |
+          grep -q 'CURRENT_UPDATE_VERSION = 52' vencord-plugin/jadgesBadges/updater.ts
+          grep -q 'UPDATE_VERSION = 52' src/vencordUpdateDashboardIntegration.ts
+          grep -q '"version": 52' vencord-plugin/update.json
+
+      - name: Commit startup fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Fix Jadges badge initialization on startup"
+          git push
