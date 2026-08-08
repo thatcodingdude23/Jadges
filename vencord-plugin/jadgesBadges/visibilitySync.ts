@@ -1,6 +1,8 @@
 import { Settings } from "@api/Settings";
 import { findStoreLazy } from "@webpack";
 
+import { startPartnerGuildSync, stopPartnerGuildSync } from "./partnerGuildSync";
+
 interface UserProfileLike {
     userId?: string;
     fetchEndedAt?: number;
@@ -251,6 +253,7 @@ export function startVisibilitySync(): void {
     observer?.disconnect();
     observer = new MutationObserver(() => syncProfileVisibility());
     observer.observe(document.body, { childList: true, subtree: true });
+    startPartnerGuildSync();
     void refreshVisibility();
     refreshTimer = setInterval(() => void refreshVisibility(), REFRESH_INTERVAL);
 }
@@ -263,5 +266,6 @@ export function stopVisibilitySync(): void {
     visibilityData = {};
     customBadgeOwners.clear();
     customImageOwners.clear();
+    stopPartnerGuildSync();
     restoreAll();
 }
