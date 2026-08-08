@@ -2,12 +2,9 @@ name: Apply Jadges badge directory v2
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
-      - scripts/apply-jadges-community-v2.py
-      - .github/workflows/apply-jadges-community-v2.yml
-  workflow_dispatch:
+      - "__trigger_jadges_community_v2"
 
 permissions:
   contents: write
@@ -69,6 +66,7 @@ jobs:
       - name: Remove one-time migration files
         run: |
           rm -f jadges-v2-migration.log jadges-v2-typescript.log
+          rm -f __trigger_jadges_community_v2
           rm scripts/apply-jadges-community-v2.py
           rm .github/workflows/apply-jadges-community-v2.yml
       - name: Commit Jadges community v2
