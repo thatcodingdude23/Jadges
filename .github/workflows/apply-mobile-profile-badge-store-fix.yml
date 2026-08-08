@@ -1,0 +1,268 @@
+name: Apply mobile profile badge store fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "__trigger_mobile_profile_badge_store_fix"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch Revenge full profile badge store
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("revenge-plugin/index.js")
+          text = path.read_text()
+
+          def replace_once(old, new):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one match, found {count}: {old[:100]!r}")
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              "  let unpatch;\n  let refreshTimer;\n",
+              "  let unpatch;\n  let profileStoreUnpatch;\n  let refreshTimer;\n"
+          )
+
+          replace_once(
+              "  const reportedNative = new Map();\n",
+              "  const reportedNative = new Map();\n  const profileBadgeSnapshots = new Map();\n"
+          )
+
+          marker = "  function orderedCombinedBadges(userId, jadges, syntheticBadges, discordBadges) {\n"
+          helper = r'''  function syntheticBadgesForUser(userId, jadges) {
+    const nitro = getNitroPreset(jadges);
+    const hideNativeBadges =
+      nitro?.hideNativeBadges === true || nitro?.key === "remove";
+    const syntheticBadges = [];
+
+    jadges.forEach((item, index) => {
+      if (!item || typeof item !== "object" || item.metadata) return;
+
+      if (item.nitro) {
+        if (hideNativeBadges) return;
+        const mobileIcon =
+          typeof item.nitro.mobileIcon === "string" &&
+          item.nitro.mobileIcon.startsWith("https://")
+            ? item.nitro.mobileIcon
+            : item.nitro.profileIcon;
+        if (typeof mobileIcon !== "string" || !mobileIcon.startsWith("https://")) return;
+
+        const id = `jadges-nitro-${userId}-${index}`;
+        const label = `Subscriber since ${formatDate(item.nitro.subscriberSince)}`;
+        syntheticBadges.push(
+          makeImageBadge(
+            id,
+            item.key || "nitro",
+            mobileIcon,
+            label,
+            userId,
+            {
+              nitro: item.nitro,
+              originalProfileIcon: item.nitro.profileIcon
+            }
+          )
+        );
+        return;
+      }
+
+      if (typeof item.badge !== "string" || !item.badge.startsWith("https://")) return;
+      const id = `jadges-${userId}-${index}`;
+      const label = item.key === QUEST_BADGE_KEY
+        ? QUEST_MOBILE_NAME
+        : item.tooltip || item.name || "Jadges Badge";
+      syntheticBadges.push(
+        makeImageBadge(
+          id,
+          item.key || `custom:${index}`,
+          item.badge,
+          label,
+          userId,
+          { createdAt: item.createdAt }
+        )
+      );
+    });
+
+    return { nitro, hideNativeBadges, syntheticBadges };
+  }
+
+  function filteredDiscordBadges(originalBadges, nitro, hideNativeBadges) {
+    return (Array.isArray(originalBadges) ? originalBadges : [])
+      .filter(badge => !String(badge?.id || "").startsWith("jadges-"))
+      .filter(badge => {
+        if (hideNativeBadges) {
+          return !isNitroBadge(badge) && !isServerBoostBadge(badge);
+        }
+        return !nitro || !isNitroBadge(badge);
+      });
+  }
+
+  function augmentStoredProfileBadges(args, profile) {
+    if (!profile || typeof profile !== "object") return profile;
+
+    const userId = resolveBadgeUserId(args) || resolveUserId(profile);
+    if (!userId) return profile;
+
+    const jadges = Array.isArray(badgeData[userId]) ? badgeData[userId] : [];
+    const hasSettings = Boolean(settingsData[userId]);
+    if (jadges.length === 0 && !hasSettings) return profile;
+
+    if (!profileBadgeSnapshots.has(profile)) {
+      profileBadgeSnapshots.set(
+        profile,
+        Array.isArray(profile.badges) ? profile.badges : []
+      );
+    }
+
+    const originalBadges = profileBadgeSnapshots.get(profile) || [];
+    void reportNativeBadges(userId, originalBadges);
+
+    const { nitro, hideNativeBadges, syntheticBadges } = syntheticBadgesForUser(userId, jadges);
+    const discordBadges = filteredDiscordBadges(originalBadges, nitro, hideNativeBadges);
+    const combined = orderedCombinedBadges(userId, jadges, syntheticBadges, discordBadges);
+
+    try {
+      profile.badges = combined;
+      return profile;
+    } catch {
+      try {
+        return { ...profile, badges: combined };
+      } catch {
+        return profile;
+      }
+    }
+  }
+
+  function installProfileStoreBadgePatch() {
+    let found;
+    try {
+      found = vendetta.metro.findByProps("getUserProfile");
+    } catch {}
+
+    const store = found?.default && typeof found.default.getUserProfile === "function"
+      ? found.default
+      : found;
+
+    if (!store || typeof store.getUserProfile !== "function") {
+      vendetta.logger.warn("[JadgesBadges] Discord's UserProfile store was not found");
+      return;
+    }
+
+    try {
+      profileStoreUnpatch = vendetta.patcher.after(
+        "getUserProfile",
+        store,
+        (args, profile) => augmentStoredProfileBadges(args, profile)
+      );
+      vendetta.logger.log("[JadgesBadges] Full mobile profile badge store bridge enabled");
+    } catch (error) {
+      vendetta.logger.warn("[JadgesBadges] Could not patch the UserProfile store", error);
+    }
+  }
+
+'''
+          if marker not in text:
+              raise SystemExit("orderedCombinedBadges marker not found")
+          text = text.replace(marker, helper + marker, 1)
+
+          old_block = r'''          const nitro = getNitroPreset(jadges);
+          const hideNativeBadges =
+            nitro?.hideNativeBadges === true || nitro?.key === "remove";
+          const syntheticBadges = [];
+
+          jadges.forEach((item, index) => {
+            if (!item || typeof item !== "object" || item.metadata) return;
+
+            if (item.nitro) {
+              if (hideNativeBadges) return;
+              const mobileIcon =
+                typeof item.nitro.mobileIcon === "string" &&
+                item.nitro.mobileIcon.startsWith("https://")
+                  ? item.nitro.mobileIcon
+                  : item.nitro.profileIcon;
+              if (typeof mobileIcon !== "string" || !mobileIcon.startsWith("https://")) return;
+
+              const id = `jadges-nitro-${userId}-${index}`;
+              const label = `Subscriber since ${formatDate(item.nitro.subscriberSince)}`;
+              syntheticBadges.push(
+                makeImageBadge(
+                  id,
+                  item.key || "nitro",
+                  mobileIcon,
+                  label,
+                  userId,
+                  {
+                    nitro: item.nitro,
+                    originalProfileIcon: item.nitro.profileIcon
+                  }
+                )
+              );
+              return;
+            }
+
+            if (typeof item.badge !== "string" || !item.badge.startsWith("https://")) return;
+            const id = `jadges-${userId}-${index}`;
+            const label = item.key === QUEST_BADGE_KEY
+              ? QUEST_MOBILE_NAME
+              : item.tooltip || item.name || "Jadges Badge";
+            syntheticBadges.push(
+              makeImageBadge(
+                id,
+                item.key || `custom:${index}`,
+                item.badge,
+                label,
+                userId,
+                { createdAt: item.createdAt }
+              )
+            );
+          });
+
+          const discordBadges = (Array.isArray(originalBadges) ? originalBadges : [])
+            .filter(badge => {
+              if (hideNativeBadges) {
+                return !isNitroBadge(badge) && !isServerBoostBadge(badge);
+              }
+              return !nitro || !isNitroBadge(badge);
+            });
+'''
+          new_block = r'''          const { nitro, hideNativeBadges, syntheticBadges } = syntheticBadgesForUser(userId, jadges);
+          const discordBadges = filteredDiscordBadges(originalBadges, nitro, hideNativeBadges);
+'''
+          replace_once(old_block, new_block)
+
+          replace_once(
+              "    const initialRefresh = refreshBadges();\n\n    try {\n",
+              "    const initialRefresh = refreshBadges();\n    installProfileStoreBadgePatch();\n\n    try {\n"
+          )
+
+          replace_once(
+              "  function onUnload() {\n    unpatch?.();\n    unpatch = undefined;\n",
+              "  function onUnload() {\n    unpatch?.();\n    unpatch = undefined;\n    profileStoreUnpatch?.();\n    profileStoreUnpatch = undefined;\n    for (const [profile, badges] of profileBadgeSnapshots) {\n      try { profile.badges = badges; } catch {}\n    }\n    profileBadgeSnapshots.clear();\n"
+          )
+
+          path.write_text(text)
+          PY
+
+      - name: Validate mobile JavaScript
+        run: node --check revenge-plugin/index.js
+
+      - name: Remove one-time files and commit
+        run: |
+          rm -f __trigger_mobile_profile_badge_store_fix
+          rm -f .github/workflows/apply-mobile-profile-badge-store-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix Jadges badges on full Revenge mobile profiles"
+          git push
