@@ -5,6 +5,7 @@
     "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/custom-profile.js",
     "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/quest-name.js",
     "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/index.js",
+    "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/profile-badges.js",
     "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/partner-guild.js",
     "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/theme.js",
     "https://raw.githubusercontent.com/thatcodingdude23/Jadges/main/revenge-plugin/visibility.js"
