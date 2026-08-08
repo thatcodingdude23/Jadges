@@ -1,6 +1,6 @@
 import http, { type RequestListener, type ServerResponse } from "node:http";
 
-const UPDATE_VERSION = 52;
+const UPDATE_VERSION = 53;
 let installed = false;
 
 function sendManifest(response: ServerResponse): void {
