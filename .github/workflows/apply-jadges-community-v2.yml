@@ -1,0 +1,41 @@
+name: Apply Jadges badge directory v2
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - scripts/apply-jadges-community-v2.py
+      - .github/workflows/apply-jadges-community-v2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Apply Jadges community v2 patch
+        run: python3 scripts/apply-jadges-community-v2.py
+      - name: Verify TypeScript
+        run: |
+          npm ci
+          npm run check
+      - name: Remove one-time migration files
+        run: |
+          rm scripts/apply-jadges-community-v2.py
+          rm .github/workflows/apply-jadges-community-v2.yml
+      - name: Commit Jadges community v2
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add badge directory v2 and community features"
+          git push
