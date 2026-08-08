@@ -1,6 +1,5 @@
 name: Apply Jadges badge directory v2
 
-# Second push intentionally triggers this one-time migration after the workflow exists.
 on:
   push:
     branches:
@@ -24,13 +23,52 @@ jobs:
           node-version: '22'
           cache: npm
       - name: Apply Jadges community v2 patch
-        run: python3 scripts/apply-jadges-community-v2.py
-      - name: Verify TypeScript
+        id: migrate
+        continue-on-error: true
         run: |
-          npm ci
-          npm run check
+          set +e
+          python3 scripts/apply-jadges-community-v2.py > jadges-v2-migration.log 2>&1
+          code=$?
+          cat jadges-v2-migration.log
+          exit $code
+      - name: Save migration error
+        if: steps.migrate.outcome == 'failure'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add jadges-v2-migration.log
+          git commit -m "Log Jadges v2 migration failure"
+          git push
+      - name: Stop after migration error
+        if: steps.migrate.outcome == 'failure'
+        run: exit 1
+      - name: Verify TypeScript
+        id: typescript
+        continue-on-error: true
+        run: |
+          set +e
+          npm ci > jadges-v2-typescript.log 2>&1
+          code=$?
+          if [ $code -eq 0 ]; then
+            npm run check >> jadges-v2-typescript.log 2>&1
+            code=$?
+          fi
+          cat jadges-v2-typescript.log
+          exit $code
+      - name: Save TypeScript error
+        if: steps.typescript.outcome == 'failure'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add jadges-v2-typescript.log
+          git commit -m "Log Jadges v2 TypeScript failure"
+          git push
+      - name: Stop after TypeScript error
+        if: steps.typescript.outcome == 'failure'
+        run: exit 1
       - name: Remove one-time migration files
         run: |
+          rm -f jadges-v2-migration.log jadges-v2-typescript.log
           rm scripts/apply-jadges-community-v2.py
           rm .github/workflows/apply-jadges-community-v2.yml
       - name: Commit Jadges community v2
