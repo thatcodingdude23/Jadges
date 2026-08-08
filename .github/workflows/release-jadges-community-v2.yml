@@ -1,0 +1,62 @@
+name: Release Jadges community v2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "__trigger_jadges_community_v2_release"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish desktop update version 53
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path_str: str, old: str, new: str) -> None:
+              path = Path(path_str)
+              text = path.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected exactly one match in {path_str}, found {count}")
+              path.write_text(text.replace(old, new, 1))
+
+          replace_once(
+              "vencord-plugin/jadgesBadges/updater.ts",
+              "const CURRENT_UPDATE_VERSION = 52;",
+              "const CURRENT_UPDATE_VERSION = 53;",
+          )
+          replace_once(
+              "src/vencordUpdateDashboardIntegration.ts",
+              "const UPDATE_VERSION = 52;",
+              "const UPDATE_VERSION = 53;",
+          )
+          replace_once(
+              "vencord-plugin/update.json",
+              '"version": 52',
+              '"version": 53',
+          )
+
+          Path("__trigger_jadges_community_v2_release").unlink(missing_ok=True)
+          Path(".github/workflows/release-jadges-community-v2.yml").unlink(missing_ok=True)
+          PY
+      - name: Validate release version
+        run: |
+          grep -q 'CURRENT_UPDATE_VERSION = 53' vencord-plugin/jadgesBadges/updater.ts
+          grep -q 'UPDATE_VERSION = 53' src/vencordUpdateDashboardIntegration.ts
+          grep -q '"version": 53' vencord-plugin/update.json
+      - name: Commit release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Release Jadges desktop v53"
+          git push
